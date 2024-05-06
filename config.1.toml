@@ -1,0 +1,24 @@
+[network]
+
+# Local address to listen on
+bind = "localhost"
+
+# Local port to listen on
+port = 6681
+
+[peer]
+
+# Initial peers to connect to
+seeds = ["localhost:6680"]
+
+# Maximum number of peers to connect to
+max_peer_count = 10
+
+# Number of unhandled messages that are kept waiting in a buffer
+max_pending_messages = 32
+
+# Number of messages waiting to be sent to all peers
+max_pending_send_to_all = 128
+
+# Period in millis after which heartbeats are sent in case of quiscient period
+heartbeat_interval = 1000
