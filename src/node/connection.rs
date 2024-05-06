@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use futures::sink::SinkExt;
 use tokio::{
     net::{
@@ -9,11 +11,12 @@ use tokio::{
 use tokio_stream::StreamExt;
 use tokio_util::{
     bytes::Bytes,
-    codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
+    codec::{FramedRead, FramedWrite, LengthDelimitedCodec}, sync::CancellationToken,
 };
 
 #[derive(Debug)]
 pub struct Connection {
+    peer_address: SocketAddr,
     reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
     writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
     send_channel: mpsc::Sender<Bytes>,
@@ -24,6 +27,7 @@ impl Connection {
     /// Build a new connection struct to work with the TcpStream
     pub fn new(stream: TcpStream) -> Self {
         // Setup a length delimted codec for Noise
+        let peer_address = stream.peer_addr().unwrap();
         let (r, w) = stream.into_split();
         let reader = LengthDelimitedCodec::builder()
             .length_field_offset(0)
@@ -39,6 +43,7 @@ impl Connection {
         // Create a channel to buffer read/write processing
         let buffering_channel = mpsc::channel::<Bytes>(32);
         Connection {
+            peer_address,
             reader,
             writer,
             send_channel: buffering_channel.0,
@@ -47,11 +52,13 @@ impl Connection {
     }
 
     pub async fn start(self, init: bool) {
+        let token = CancellationToken::new();
+        let cloned_token = token.clone();
         tokio::spawn(async move {
-            start_reader(self.reader, self.send_channel).await;
+            start_reader(self.reader, self.send_channel, token).await;
         });
         tokio::spawn(async move {
-            start_writer(self.writer, self.receive_channel, init).await;
+            start_writer(self.writer, self.receive_channel, init, cloned_token).await;
         });
     }
 }
@@ -59,6 +66,7 @@ impl Connection {
 pub async fn start_reader(
     mut reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
     wx: mpsc::Sender<Bytes>,
+    token: CancellationToken
 ) {
     loop {
         if let Some(data) = reader.next().await {
@@ -69,7 +77,12 @@ pub async fn start_reader(
                         log::debug!("Error en-queuing message: {}", e)
                     }
                 }
-                Err(e) => log::info!("Error receiving data {:?}", e),
+                Err(e) => {
+                    log::debug!("Error reading from channel {:?}", e);
+                    log::info!("Closing connection");
+                    token.cancel();
+                    return;
+                },
             }
         }
     }
@@ -79,13 +92,19 @@ pub async fn start_writer(
     mut writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
     mut rx: mpsc::Receiver<Bytes>,
     init: bool,
+    token: CancellationToken
 ) {
     if init {
         let _ = writer.send(Bytes::from("ping")).await;
     }
     loop {
-        if let Some(message) = rx.recv().await {
-            let _ = writer.send(message).await;
+        tokio::select! {
+            Some(message) = rx.recv() => {
+                let _ = writer.send(message).await;
+            },
+            _ = token.cancelled() => {
+                return;
+            }
         }
     }
 }
