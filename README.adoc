@@ -1,3 +1,12 @@
+== FROST Federation
+
+A federation of nodes running FROST to generate threshold signatures
+for itself and on the request of clients.
+
+The federation also saves and synchronises data and commands sent by
+clients. The federation then runs a priori known validation scheme on
+the data before generating a threshold signature.
+
 == System Model
 
 === Network Connectivity
