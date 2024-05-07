@@ -35,7 +35,6 @@ use tokio_util::{
 
 #[derive(Debug)]
 pub struct Connection {
-    peer_address: SocketAddr,
     reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
     writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
     send_channel: mpsc::Sender<Bytes>,
@@ -46,7 +45,6 @@ impl Connection {
     /// Build a new connection struct to work with the TcpStream
     pub fn new(stream: TcpStream) -> Self {
         // Setup a length delimted codec for Noise
-        let peer_address = stream.peer_addr().unwrap();
         let (r, w) = stream.into_split();
         let reader = LengthDelimitedCodec::builder()
             .length_field_offset(0)
@@ -62,7 +60,6 @@ impl Connection {
         // Create a channel to buffer read/write processing
         let buffering_channel = mpsc::channel::<Bytes>(32);
         Connection {
-            peer_address,
             reader,
             writer,
             send_channel: buffering_channel.0,
