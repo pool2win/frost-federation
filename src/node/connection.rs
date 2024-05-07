@@ -1,3 +1,21 @@
+// Copyright 2024 Kulpreet Singh
+
+// This file is part of Frost-Federation
+
+// Frost-Federation is free software: you can redistribute it and/or
+// modify it under the terms of the GNU General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+
+// Frost-Federation is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+
+// You should have received a copy of the GNU General Public License
+// along with Frost-Federation. If not, see
+// <https://www.gnu.org/licenses/>.
+
 use std::net::SocketAddr;
 
 use futures::sink::SinkExt;
@@ -11,7 +29,8 @@ use tokio::{
 use tokio_stream::StreamExt;
 use tokio_util::{
     bytes::Bytes,
-    codec::{FramedRead, FramedWrite, LengthDelimitedCodec}, sync::CancellationToken,
+    codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
+    sync::CancellationToken,
 };
 
 #[derive(Debug)]
@@ -66,7 +85,7 @@ impl Connection {
 pub async fn start_reader(
     mut reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
     wx: mpsc::Sender<Bytes>,
-    token: CancellationToken
+    token: CancellationToken,
 ) {
     loop {
         if let Some(data) = reader.next().await {
@@ -82,7 +101,7 @@ pub async fn start_reader(
                     log::info!("Closing connection");
                     token.cancel();
                     return;
-                },
+                }
             }
         }
     }
@@ -92,7 +111,7 @@ pub async fn start_writer(
     mut writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
     mut rx: mpsc::Receiver<Bytes>,
     init: bool,
-    token: CancellationToken
+    token: CancellationToken,
 ) {
     if init {
         let _ = writer.send(Bytes::from("ping")).await;
