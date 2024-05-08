@@ -23,7 +23,6 @@ use tokio::{
     },
     sync::mpsc,
 };
-use tokio_stream::StreamExt;
 use tokio_util::{
     bytes::Bytes,
     codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
@@ -31,6 +30,8 @@ use tokio_util::{
 };
 
 use crate::node::reliable_sender::ReliableSender;
+
+use super::read_handler::{self, ReadHandler};
 
 #[derive(Debug)]
 pub struct Connection {
@@ -69,9 +70,16 @@ impl Connection {
     pub async fn start(self, init: bool) {
         let token = CancellationToken::new();
         let cloned_token = token.clone();
+
+        let mut read_handler = ReadHandler {
+            send_channel: self.send_channel,
+            framed_reader: self.reader,
+            cancel_token: token,
+        };
         tokio::spawn(async move {
-            start_reader(self.reader, self.send_channel, token).await;
+            read_handler.start().await;
         });
+
         let mut sender = ReliableSender {
             receive_channel: self.receive_channel,
             framed_writer: self.writer,
@@ -80,30 +88,5 @@ impl Connection {
         tokio::spawn(async move {
             sender.start(init).await;
         });
-    }
-}
-
-pub async fn start_reader(
-    mut reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
-    wx: mpsc::Sender<Bytes>,
-    token: CancellationToken,
-) {
-    loop {
-        if let Some(data) = reader.next().await {
-            match data {
-                Ok(data) => {
-                    log::debug!("Received ... {:?}", data);
-                    if let Err(e) = wx.send(data.freeze()).await {
-                        log::debug!("Error en-queuing message: {}", e)
-                    }
-                }
-                Err(e) => {
-                    log::debug!("Error reading from channel {:?}", e);
-                    log::info!("Closing connection");
-                    token.cancel();
-                    return;
-                }
-            }
-        }
     }
 }

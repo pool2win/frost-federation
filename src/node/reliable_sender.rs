@@ -34,7 +34,6 @@ pub struct ReliableSender {
 }
 
 impl ReliableSender {
-    //pub fn send(msg: Bytes) {}
     pub async fn start(&mut self, init: bool) {
         if init {
             let _ = self.framed_writer.send(Bytes::from("ping")).await;
