@@ -16,9 +16,6 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use std::net::SocketAddr;
-
-use futures::sink::SinkExt;
 use tokio::{
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
@@ -32,6 +29,8 @@ use tokio_util::{
     codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
     sync::CancellationToken,
 };
+
+use crate::node::reliable_sender::ReliableSender;
 
 #[derive(Debug)]
 pub struct Connection {
@@ -73,8 +72,13 @@ impl Connection {
         tokio::spawn(async move {
             start_reader(self.reader, self.send_channel, token).await;
         });
+        let mut sender = ReliableSender {
+            receive_channel: self.receive_channel,
+            framed_writer: self.writer,
+            cancel_token: cloned_token,
+        };
         tokio::spawn(async move {
-            start_writer(self.writer, self.receive_channel, init, cloned_token).await;
+            sender.start(init).await;
         });
     }
 }
@@ -99,27 +103,6 @@ pub async fn start_reader(
                     token.cancel();
                     return;
                 }
-            }
-        }
-    }
-}
-
-pub async fn start_writer(
-    mut writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
-    mut rx: mpsc::Receiver<Bytes>,
-    init: bool,
-    token: CancellationToken,
-) {
-    if init {
-        let _ = writer.send(Bytes::from("ping")).await;
-    }
-    loop {
-        tokio::select! {
-            Some(message) = rx.recv() => {
-                let _ = writer.send(message).await;
-            },
-            _ = token.cancelled() => {
-                return;
             }
         }
     }
