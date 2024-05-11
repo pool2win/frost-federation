@@ -29,16 +29,17 @@ use tokio_util::{
     sync::CancellationToken,
 };
 
-use crate::node::reliable_sender::ReliableSender;
+use crate::node::noise_reader::NoiseReader;
+use crate::node::noise_writer::NoiseWriter;
 
-use super::read_handler::{self, ReadHandler};
+use super::noise_handler::NoiseHandler;
 
 #[derive(Debug)]
 pub struct Connection {
     reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
     writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
-    send_channel: mpsc::Sender<Bytes>,
-    receive_channel: mpsc::Receiver<Bytes>,
+    read_channel: (mpsc::Sender<Bytes>, mpsc::Receiver<Bytes>),
+    write_channel: (mpsc::Sender<Bytes>, mpsc::Receiver<Bytes>),
 }
 
 impl Connection {
@@ -46,24 +47,26 @@ impl Connection {
     pub fn new(stream: TcpStream) -> Self {
         // Setup a length delimted codec for Noise
         let (r, w) = stream.into_split();
-        let reader = LengthDelimitedCodec::builder()
+        let framed_reader = LengthDelimitedCodec::builder()
             .length_field_offset(0)
             .length_field_length(2)
             .length_adjustment(0)
             .new_read(r);
-        let writer = LengthDelimitedCodec::builder()
+        let framed_writer = LengthDelimitedCodec::builder()
             .length_field_offset(0)
             .length_field_length(2)
             .length_adjustment(0)
             .new_write(w);
 
-        // Create a channel to buffer read/write processing
-        let buffering_channel = mpsc::channel::<Bytes>(32);
+        // Create a channel to buffer read processing
+        let read_channel = mpsc::channel::<Bytes>(32);
+        // Create a channel to buffer write processing
+        let write_channel = mpsc::channel::<Bytes>(32);
         Connection {
-            reader,
-            writer,
-            send_channel: buffering_channel.0,
-            receive_channel: buffering_channel.1,
+            reader: framed_reader,
+            writer: framed_writer,
+            read_channel,
+            write_channel,
         }
     }
 
@@ -71,22 +74,26 @@ impl Connection {
         let token = CancellationToken::new();
         let cloned_token = token.clone();
 
-        let mut read_handler = ReadHandler {
-            send_channel: self.send_channel,
+        let noise_handler = NoiseHandler::new(self.read_channel.1, self.write_channel.0, init);
+
+        let mut noise_reader = NoiseReader {
+            send_channel: self.read_channel.0,
             framed_reader: self.reader,
             cancel_token: token,
         };
         tokio::spawn(async move {
-            read_handler.start().await;
+            noise_reader.start().await;
         });
 
-        let mut sender = ReliableSender {
-            receive_channel: self.receive_channel,
+        let mut noise_writer = NoiseWriter {
+            receive_channel: self.write_channel.1,
             framed_writer: self.writer,
             cancel_token: cloned_token,
         };
         tokio::spawn(async move {
-            sender.start(init).await;
+            noise_writer.start().await;
         });
+
+        noise_handler.run_handshake().await;
     }
 }

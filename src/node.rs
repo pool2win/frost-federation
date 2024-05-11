@@ -20,8 +20,9 @@ use crate::node::connection::Connection;
 use tokio::net::{TcpListener, TcpStream};
 
 mod connection;
-mod read_handler;
-mod reliable_sender;
+mod noise_handler;
+mod noise_reader;
+mod noise_writer;
 
 #[derive(Debug)]
 pub struct Node {

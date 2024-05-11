@@ -25,21 +25,22 @@ use tokio_util::sync::CancellationToken;
 // Bring StreamExt in scope for access to `next` calls
 use tokio_stream::StreamExt;
 
-/// Handle incoming messages over the network by figuring out a
-/// response and sending the response via a channel to ReliableSender
-pub struct ReadHandler {
+/// Read messages from the framed reader and treat it as a noise
+/// message. If message is a valid noise message, pass it to the
+/// higher layer, else return error and shut down connection.
+pub struct NoiseReader {
     pub send_channel: mpsc::Sender<Bytes>,
     pub framed_reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
     pub cancel_token: CancellationToken,
 }
 
-impl ReadHandler {
+impl NoiseReader {
     pub async fn start(&mut self) {
         loop {
             if let Some(data) = self.framed_reader.next().await {
                 match data {
                     Ok(data) => {
-                        log::debug!("Received ... {:?}", data);
+                        log::debug!("Received from network ... {:?}", data);
                         if let Err(e) = self.send_channel.send(data.freeze()).await {
                             log::debug!("Error en-queuing message: {}", e)
                         }

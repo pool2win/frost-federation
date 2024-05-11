@@ -25,22 +25,19 @@ use tokio_util::sync::CancellationToken;
 // Bring SinkExt in scope for access to `send` calls
 use futures::sink::SinkExt;
 
-/// Reliably send a message by repeatedly sending it every timeout
-/// period until an ACK is received.
-pub struct ReliableSender {
+/// Send message over the noise connection
+pub struct NoiseWriter {
     pub receive_channel: mpsc::Receiver<Bytes>,
     pub framed_writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
     pub cancel_token: CancellationToken,
 }
 
-impl ReliableSender {
-    pub async fn start(&mut self, init: bool) {
-        if init {
-            let _ = self.framed_writer.send(Bytes::from("ping")).await;
-        }
+impl NoiseWriter {
+    pub async fn start(&mut self) {
         loop {
             tokio::select! {
                 Some(message) = self.receive_channel.recv() => {
+                    log::debug!("Sending using framed writer {:?}", message);
                     let _ = self.framed_writer.send(message).await;
                 },
                 _ = self.cancel_token.cancelled() => {
