@@ -83,30 +83,28 @@ impl NoiseHandler {
             .await;
     }
 
-    async fn initiator_handshake(mut self) {
-        let mut buf = [0u8; 1024];
-        // -> e
-        self.send_handshake_message(b"").await;
-
-        // initiator processes the response...
+    async fn read_handshake_message(&mut self) {
+        let mut buf = [0u8; NOISE_MAX_MSG_LENGTH];
         let mut msg = self.read_channel_rx.recv().await.unwrap();
         let len = self
             .handshake_state
             .read_message(&msg, &mut buf[..msg.len()])
             .unwrap();
+    }
+
+    async fn initiator_handshake(mut self) {
+        // -> e
+        self.send_handshake_message(b"").await;
+
+        // initiator processes the response...
+        self.read_handshake_message().await;
         self.transport_state = Some(self.handshake_state.into_transport_mode().unwrap());
         log::info!("Noise channel established");
     }
 
     async fn responder_handshake(mut self) {
-        let mut buf = [0u8; 1024];
-
+        self.read_handshake_message().await;
         // <- e, ee
-        let msg = self.read_channel_rx.recv().await.unwrap();
-        let read_len = self
-            .handshake_state
-            .read_message(&msg, &mut buf[..msg.len()])
-            .unwrap();
         self.send_handshake_message(b"").await;
         self.transport_state = Some(self.handshake_state.into_transport_mode().unwrap());
         log::info!("Noise channel established");
