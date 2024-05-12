@@ -18,7 +18,7 @@
 
 use snow::{HandshakeState, TransportState};
 use tokio::sync::mpsc;
-use tokio_util::bytes::{Buf, Bytes};
+use tokio_util::bytes::{Buf, Bytes, BytesMut};
 
 // TODO[pool2win]: Change this to XK once we have setup pubkey as node id
 //
@@ -27,6 +27,7 @@ use tokio_util::bytes::{Buf, Bytes};
 // noise_params: "Noise_XX_25519_ChaChaPoly_SHA256".parse().unwrap(),
 
 static PATTERN: &str = "Noise_NN_25519_ChaChaPoly_BLAKE2s";
+const NOISE_MAX_MSG_LENGTH: usize = 65535;
 
 pub struct NoiseHandler {
     /// Channel Sender that is consumed by Connection to write to
@@ -70,28 +71,35 @@ impl NoiseHandler {
         }
     }
 
-    async fn initiator_handshake(mut self) {
-        let (mut buf, mut buf2, mut read_buf) = ([0u8; 1024], [0u8; 1024], [0u8; 1024]);
-        // -> e
-        let len = self.handshake_state.write_message(&[], &mut buf).unwrap();
-
+    async fn send_handshake_message(&mut self, message: &[u8]) {
+        let mut buf = [0u8; NOISE_MAX_MSG_LENGTH];
+        let len = self
+            .handshake_state
+            .write_message(message, &mut buf)
+            .unwrap();
         let _ = self
             .write_channel_sx
             .send(Bytes::from_iter(buf).slice(0..len))
             .await;
+    }
+
+    async fn initiator_handshake(mut self) {
+        let mut buf = [0u8; 1024];
+        // -> e
+        self.send_handshake_message(b"").await;
 
         // initiator processes the response...
         let mut msg = self.read_channel_rx.recv().await.unwrap();
         let len = self
             .handshake_state
-            .read_message(&msg, &mut buf2[..msg.len()])
+            .read_message(&msg, &mut buf[..msg.len()])
             .unwrap();
         self.transport_state = Some(self.handshake_state.into_transport_mode().unwrap());
         log::info!("Noise channel established");
     }
 
     async fn responder_handshake(mut self) {
-        let (mut buf, mut buf2) = ([0u8; 1024], [0u8; 1024]);
+        let mut buf = [0u8; 1024];
 
         // <- e, ee
         let msg = self.read_channel_rx.recv().await.unwrap();
@@ -99,11 +107,7 @@ impl NoiseHandler {
             .handshake_state
             .read_message(&msg, &mut buf[..msg.len()])
             .unwrap();
-        let buf2_len = self.handshake_state.write_message(&[], &mut buf2).unwrap();
-        let _ = self
-            .write_channel_sx
-            .send(Bytes::from_iter(buf2).slice(0..buf2_len))
-            .await;
+        self.send_handshake_message(b"").await;
         self.transport_state = Some(self.handshake_state.into_transport_mode().unwrap());
         log::info!("Noise channel established");
     }
