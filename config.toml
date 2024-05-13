@@ -4,12 +4,12 @@
 bind = "localhost"
 
 # Local port to listen on
-port = 6681
+port = 6680
 
 [peer]
 
-# Initial peers to connect to
-seeds = ["localhost:6680"]
+# I am the seed
+seeds = []
 
 # Maximum number of peers to connect to
 max_peer_count = 10
@@ -27,7 +27,7 @@ heartbeat_interval = 1000
 
 key = """
 -----BEGIN PRIVATE KEY-----
-MFECAQEwBQYDK2VwBCIEIPCN4nC8Zn9jEKBc4jiUCPcHNdqQ8WgpyUv09eKJHSxf
-gSEAtJysJ2e6m4ze8Kz1zYjBByVR4EO/7iGRkTtd7cYOGi0=
+MFECAQEwBQYDK2VwBCIEIJ7pILqR7yBPsVuysfGyofjOEm19skmtqcJYWiVwjKH1
+gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
 -----END PRIVATE KEY-----
 """

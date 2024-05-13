@@ -70,11 +70,12 @@ impl Connection {
         }
     }
 
-    pub async fn start(self, init: bool) {
+    pub async fn start(self, init: bool, pem_key: String) {
         let token = CancellationToken::new();
         let cloned_token = token.clone();
 
-        let noise_handler = NoiseHandler::new(self.read_channel.1, self.write_channel.0, init);
+        let noise_handler =
+            NoiseHandler::new(self.read_channel.1, self.write_channel.0, init, pem_key);
 
         let mut noise_reader = NoiseReader {
             send_channel: self.read_channel.0,

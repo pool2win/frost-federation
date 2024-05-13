@@ -28,6 +28,7 @@ mod noise_writer;
 pub struct Node {
     pub seeds: Vec<String>,
     pub bind_address: String,
+    pub static_key_pem: String,
     //pub connections: Vec<Connection>,
     //sender: mpsc::Sender<[u8]>,
 }
@@ -38,6 +39,7 @@ impl Node {
         Node {
             seeds: vec!["localhost:6680".to_string()],
             bind_address: "localhost".to_string(),
+            static_key_pem: String::new(),
         }
     }
 
@@ -50,6 +52,12 @@ impl Node {
     pub fn bind_address(self, address: String) -> Self {
         let mut node = self;
         node.bind_address = address;
+        node
+    }
+
+    pub fn static_key_pem(self, key: String) -> Self {
+        let mut node = self;
+        node.static_key_pem = key;
         node
     }
 
@@ -76,9 +84,10 @@ impl Node {
             log::debug!("Waiting on accept...");
             let (stream, socket) = listener.accept().await.unwrap();
             log::info!("Accept connection from {}:{}", socket.ip(), socket.port());
+            let key = self.static_key_pem.clone();
             tokio::spawn(async move {
                 let connection = Connection::new(stream);
-                connection.start(false).await;
+                connection.start(false, key).await;
             });
         }
     }
@@ -88,10 +97,11 @@ impl Node {
         log::debug!("Connecting to seeds...");
         for seed in self.seeds.iter() {
             log::debug!("Connecting to seed {}", seed);
+            let key = self.static_key_pem.clone();
             if let Ok(stream) = TcpStream::connect(seed).await {
                 tokio::spawn(async move {
                     let connection = Connection::new(stream);
-                    connection.start(true).await;
+                    connection.start(true, key).await;
                 });
             } else {
                 log::debug!("Failed to connect to seed {}", seed);

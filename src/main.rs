@@ -51,11 +51,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // )
     // .await;
 
-    // let mut node = node::Node::new().
-    //     seeds(config.peer.seeds).
     let mut node = node::Node::new()
         .seeds(config.peer.seeds)
-        .bind_address(bind_address);
+        .bind_address(bind_address)
+        .static_key_pem(config.noise.key);
 
     println!("{:?}", node);
     node.start().await;

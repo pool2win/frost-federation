@@ -16,6 +16,8 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
+use ed25519_dalek::pkcs8::DecodePrivateKey;
+use ed25519_dalek::SigningKey;
 use snow::{HandshakeState, Keypair, TransportState};
 use tokio::sync::mpsc;
 use tokio_util::bytes::Bytes;
@@ -41,6 +43,7 @@ pub struct NoiseHandler {
     handshake_state: HandshakeState,
     transport_state: Option<TransportState>,
     initiator: bool,
+    static_key: SigningKey,
 }
 
 impl NoiseHandler {
@@ -48,6 +51,7 @@ impl NoiseHandler {
         read_channel_rx: mpsc::Receiver<Bytes>,
         write_channel_sx: mpsc::Sender<Bytes>,
         init: bool,
+        pem_key: String,
     ) -> Self {
         let parsed_pattern = PATTERN.parse().unwrap();
         let mut builder = snow::Builder::new(parsed_pattern);
@@ -59,6 +63,8 @@ impl NoiseHandler {
         } else {
             builder.build_responder().unwrap()
         };
+        let decoded_private_key = SigningKey::from_pkcs8_pem(pem_key.as_str()).unwrap();
+        log::debug!("Using private key {:?}", decoded_private_key);
         NoiseHandler {
             handshake_state,
             transport_state: None,
@@ -66,6 +72,7 @@ impl NoiseHandler {
             read_channel_rx,
             write_channel_sx,
             initiator: init,
+            static_key: decoded_private_key,
         }
     }
 

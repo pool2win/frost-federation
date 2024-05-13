@@ -29,6 +29,9 @@ pub struct Config {
 
     #[serde(default)]
     pub peer: PeerConfig,
+
+    #[serde(default)]
+    pub noise: NoiseConfig,
 }
 
 /// Struct to capture network section of configuration from config.toml
@@ -109,12 +112,19 @@ impl Default for PeerConfig {
     }
 }
 
-/// Load configuraton from config.toml file.
+/// Struct to capture noise section of configuration from config.toml
+#[derive(Deserialize, Debug, Default, PartialEq)]
+pub struct NoiseConfig {
+    pub key: String,
+}
+
+/// Load configuration from config.toml file.
+///
 /// If no file we provided, we use the default configuration
 pub fn load_config_from_file(path: String) -> Option<Config> {
     match read_file(path) {
         Err(_) => {
-            log::info!("No config.toml file provided, using defaults.");
+            log::info!("No config.toml file provided.");
             Some(Config::default())
         }
         Ok(contents) => parse_config_from_string(contents),
@@ -274,6 +284,7 @@ mod tests {
         assert_eq!(peer.max_pending_messages, 32);
         assert_eq!(peer.max_pending_send_to_all, 128);
         assert_eq!(peer.heartbeat_interval, 1000);
+        assert_ne!(conf.noise.key.len(), 0);
     }
 
     #[test]
