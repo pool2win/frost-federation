@@ -40,8 +40,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // let manager = Arc::new(ConnectionManager::new(config.peer.max_peer_count));
 
     let (send_to_all_tx, _) = broadcast::channel::<Bytes>(config.peer.max_pending_send_to_all);
-    let connect_broadcast_sender = send_to_all_tx.clone();
-    let listen_broadcast_sender = send_to_all_tx.clone();
+    let _connect_broadcast_sender = send_to_all_tx.clone();
+    let _listen_broadcast_sender = send_to_all_tx.clone();
 
     // let (reset_notifier, _) = connection::start_heartbeat(
     //     bind_address.clone(),
@@ -51,11 +51,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // )
     // .await;
 
-    // let mut node = node::Node::new().
-    //     seeds(config.peer.seeds).
     let mut node = node::Node::new()
         .seeds(config.peer.seeds)
-        .bind_address(bind_address);
+        .bind_address(bind_address)
+        .static_key_pem(config.noise.key);
 
     println!("{:?}", node);
     node.start().await;

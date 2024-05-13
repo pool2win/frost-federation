@@ -22,3 +22,12 @@ max_pending_send_to_all = 128
 
 # Period in millis after which heartbeats are sent in case of quiscient period
 heartbeat_interval = 1000
+
+[noise]
+
+key = """
+-----BEGIN PRIVATE KEY-----
+MFECAQEwBQYDK2VwBCIEIHpIGDCPu9YvD6IS45GQj2h87Iz50D7oabLrwDC6V9vD
+gSEAhpCLOY0BHcCepM6xy2eLYeJLSd7yRQIUuQL4i405qhM=
+-----END PRIVATE KEY-----
+"""
