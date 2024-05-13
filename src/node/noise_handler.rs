@@ -18,7 +18,7 @@
 
 use snow::{HandshakeState, TransportState};
 use tokio::sync::mpsc;
-use tokio_util::bytes::{Buf, Bytes, BytesMut};
+use tokio_util::bytes::Bytes;
 
 // TODO[pool2win]: Change this to XK once we have setup pubkey as node id
 //
@@ -85,8 +85,8 @@ impl NoiseHandler {
 
     async fn read_handshake_message(&mut self) {
         let mut buf = [0u8; NOISE_MAX_MSG_LENGTH];
-        let mut msg = self.read_channel_rx.recv().await.unwrap();
-        let len = self
+        let msg = self.read_channel_rx.recv().await.unwrap();
+        let _len = self
             .handshake_state
             .read_message(&msg, &mut buf[..msg.len()])
             .unwrap();
