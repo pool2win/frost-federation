@@ -16,7 +16,7 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use snow::{HandshakeState, TransportState};
+use snow::{HandshakeState, Keypair, TransportState};
 use tokio::sync::mpsc;
 use tokio_util::bytes::Bytes;
 
@@ -26,7 +26,8 @@ use tokio_util::bytes::Bytes;
 // rust Noise implementation doesn't yet support secp256k1
 // noise_params: "Noise_XX_25519_ChaChaPoly_SHA256".parse().unwrap(),
 
-static PATTERN: &str = "Noise_NN_25519_ChaChaPoly_BLAKE2s";
+// static PATTERN: &str = "Noise_NN_25519_ChaChaPoly_BLAKE2s";
+static PATTERN: &str = "Noise_XX_25519_ChaChaPoly_SHA256";
 const NOISE_MAX_MSG_LENGTH: usize = 65535;
 
 pub struct NoiseHandler {
@@ -36,6 +37,7 @@ pub struct NoiseHandler {
     /// Channel Receiver that consumes messages produced by
     /// Connection's framed reader
     read_channel_rx: mpsc::Receiver<Bytes>,
+    keypair: Keypair,
     handshake_state: HandshakeState,
     transport_state: Option<TransportState>,
     initiator: bool,
@@ -48,7 +50,10 @@ impl NoiseHandler {
         init: bool,
     ) -> Self {
         let parsed_pattern = PATTERN.parse().unwrap();
-        let builder = snow::Builder::new(parsed_pattern);
+        let mut builder = snow::Builder::new(parsed_pattern);
+        // TODO: Read this static key from config file. Restarts should use the same key.
+        let keypair = builder.generate_keypair().unwrap();
+        builder = builder.local_private_key(&keypair.private);
         let handshake_state = if init {
             builder.build_initiator().unwrap()
         } else {
@@ -57,6 +62,7 @@ impl NoiseHandler {
         NoiseHandler {
             handshake_state,
             transport_state: None,
+            keypair,
             read_channel_rx,
             write_channel_sx,
             initiator: init,
@@ -96,16 +102,22 @@ impl NoiseHandler {
         // -> e
         self.send_handshake_message(b"").await;
 
-        // initiator processes the response...
         self.read_handshake_message().await;
+        // // -> s, se
+        self.send_handshake_message(b"").await;
+
         self.transport_state = Some(self.handshake_state.into_transport_mode().unwrap());
         log::info!("Noise channel established");
     }
 
     async fn responder_handshake(mut self) {
         self.read_handshake_message().await;
-        // <- e, ee
+        // <- e, ee, s, es
         self.send_handshake_message(b"").await;
+
+        // read -> s, se to complete handshake
+        self.read_handshake_message().await;
+
         self.transport_state = Some(self.handshake_state.into_transport_mode().unwrap());
         log::info!("Noise channel established");
     }
