@@ -25,8 +25,6 @@ mod cli;
 mod config;
 mod node;
 
-// use connection::connection_manager::ConnectionManager;
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = cli::Cli::parse();
@@ -43,40 +41,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let _connect_broadcast_sender = send_to_all_tx.clone();
     let _listen_broadcast_sender = send_to_all_tx.clone();
 
-    // let (reset_notifier, _) = connection::start_heartbeat(
-    //     bind_address.clone(),
-    //     config.peer.heartbeat_interval,
-    //     send_to_all_tx,
-    //     manager.clone(),
-    // )
-    // .await;
-
     let mut node = node::Node::new()
         .seeds(config.peer.seeds)
         .bind_address(bind_address)
         .static_key_pem(config.noise.key);
 
-    println!("{:?}", node);
     node.start().await;
-    // for seed in config.peer.seeds {
-    //     connection::connect(
-    //         seed,
-    //         manager.clone(),
-    //         config.peer.max_pending_messages,
-    //         connect_broadcast_sender.subscribe(),
-    //         reset_notifier.clone(),
-    //     );
-    // }
-
-    // connection::start_listen(
-    //     bind_address,
-    //     manager.clone(),
-    //     config.peer.max_pending_messages,
-    //     listen_broadcast_sender,
-    //     reset_notifier,
-    // )
-    // .await;
-    log::info!("Listen done");
     Ok(())
 }
 

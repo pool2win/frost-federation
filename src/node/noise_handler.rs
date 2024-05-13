@@ -114,7 +114,6 @@ impl NoiseHandler {
         self.send_handshake_message(b"").await;
 
         self.transport_state = Some(self.handshake_state.into_transport_mode().unwrap());
-        log::info!("Noise channel established");
     }
 
     async fn responder_handshake(mut self) {
@@ -126,6 +125,5 @@ impl NoiseHandler {
         self.read_handshake_message().await;
 
         self.transport_state = Some(self.handshake_state.into_transport_mode().unwrap());
-        log::info!("Noise channel established");
     }
 }

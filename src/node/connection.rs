@@ -96,5 +96,6 @@ impl Connection {
         });
 
         noise_handler.run_handshake().await;
+        log::info!("Handshake complete");
     }
 }
