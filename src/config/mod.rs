@@ -113,6 +113,7 @@ impl Default for PeerConfig {
 }
 
 /// Struct to capture noise section of configuration from config.toml
+/// TODO: Move this to a separate encrypted keystore.
 #[derive(Deserialize, Debug, Default, PartialEq)]
 pub struct NoiseConfig {
     pub key: String,

@@ -25,6 +25,7 @@ heartbeat_interval = 1000
 
 [noise]
 
+# TODO: Move this into a separate encrypted keystore.
 key = """
 -----BEGIN PRIVATE KEY-----
 MFECAQEwBQYDK2VwBCIEIJ7pILqR7yBPsVuysfGyofjOEm19skmtqcJYWiVwjKH1
