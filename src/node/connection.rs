@@ -29,8 +29,8 @@ use tokio_util::{
     sync::CancellationToken,
 };
 
-use crate::node::noise_reader::NoiseReader;
-use crate::node::noise_writer::NoiseWriter;
+use crate::node::connection_reader::ConnectionReader;
+use crate::node::connection_writer::ConnectionWriter;
 
 use super::noise_handler::NoiseHandler;
 
@@ -77,22 +77,22 @@ impl Connection {
         let noise_handler =
             NoiseHandler::new(self.read_channel.1, self.write_channel.0, init, pem_key);
 
-        let mut noise_reader = NoiseReader {
+        let mut connection_reader = ConnectionReader {
             send_channel: self.read_channel.0,
             framed_reader: self.reader,
             cancel_token: token,
         };
         tokio::spawn(async move {
-            noise_reader.start().await;
+            connection_reader.start().await;
         });
 
-        let mut noise_writer = NoiseWriter {
+        let mut connection_writer = ConnectionWriter {
             receive_channel: self.write_channel.1,
             framed_writer: self.writer,
             cancel_token: cloned_token,
         };
         tokio::spawn(async move {
-            noise_writer.start().await;
+            connection_writer.start().await;
         });
 
         noise_handler.run_handshake().await;

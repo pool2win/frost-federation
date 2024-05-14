@@ -26,13 +26,13 @@ use tokio_util::sync::CancellationToken;
 use futures::sink::SinkExt;
 
 /// Send message over the noise connection
-pub struct NoiseWriter {
+pub struct ConnectionWriter {
     pub receive_channel: mpsc::Receiver<Bytes>,
     pub framed_writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
     pub cancel_token: CancellationToken,
 }
 
-impl NoiseWriter {
+impl ConnectionWriter {
     pub async fn start(&mut self) {
         loop {
             tokio::select! {
