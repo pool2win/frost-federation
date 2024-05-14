@@ -64,7 +64,6 @@ impl NoiseHandler {
             builder.build_responder().unwrap()
         };
         let decoded_private_key = SigningKey::from_pkcs8_pem(pem_key.as_str()).unwrap();
-        log::debug!("Using private key {:?}", decoded_private_key);
         NoiseHandler {
             handshake_state,
             transport_state: None,

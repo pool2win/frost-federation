@@ -38,9 +38,13 @@ impl ConnectionWriter {
             tokio::select! {
                 Some(message) = self.receive_channel.recv() => {
                     log::debug!("Sending using framed writer {:?}", message);
-                    let _ = self.framed_writer.send(message).await;
+                    if self.framed_writer.send(message).await.is_err() {
+                        log::info!("Closing connection");
+                        self.cancel_token.cancel();
+                    }
                 },
                 _ = self.cancel_token.cancelled() => {
+                    log::info!("Connection closed");
                     return;
                 }
             }

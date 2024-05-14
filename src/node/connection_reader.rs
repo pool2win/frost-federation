@@ -36,20 +36,32 @@ pub struct ConnectionReader {
 impl ConnectionReader {
     pub async fn start(&mut self) {
         loop {
-            if let Some(data) = self.framed_reader.next().await {
-                match data {
-                    Ok(data) => {
-                        log::debug!("Received from network ... {:?}", data);
-                        if let Err(e) = self.send_channel.send(data.freeze()).await {
-                            log::debug!("Error en-queuing message: {}", e)
+            tokio::select! {
+                data = self.framed_reader.next() => {
+                    if let Some(message) = data {
+                        match message {
+                            Ok(message) => {
+                                log::debug!("Received from network ... {:?}", message);
+                                if let Err(e) = self.send_channel.send(message.freeze()).await {
+                                    log::debug!("Error en-queuing message: {}", e)
+                                }
+                            }
+                            Err(e) => {
+                                log::debug!("Error reading from channel {:?}", e);
+                                self.cancel_token.cancel();
+                                return;
+                            }
                         }
+
                     }
-                    Err(e) => {
-                        log::debug!("Error reading from channel {:?}", e);
-                        log::info!("Closing connection");
+                    else {
                         self.cancel_token.cancel();
                         return;
                     }
+                },
+                _ = self.cancel_token.cancelled() => {
+                    log::info!("Connection closed");
+                    return
                 }
             }
         }
