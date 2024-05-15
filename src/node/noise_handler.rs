@@ -17,7 +17,7 @@
 // <https://www.gnu.org/licenses/>.
 
 use ed25519_dalek::pkcs8::DecodePrivateKey;
-use ed25519_dalek::SigningKey;
+use ed25519_dalek::{SigningKey, SECRET_KEY_LENGTH};
 use snow::{HandshakeState, Keypair, TransportState};
 use tokio::sync::mpsc;
 use tokio_util::bytes::Bytes;
@@ -39,11 +39,18 @@ pub struct NoiseHandler {
     /// Channel Receiver that consumes messages produced by
     /// Connection's framed reader
     read_channel_rx: mpsc::Receiver<Bytes>,
-    keypair: Keypair,
     handshake_state: HandshakeState,
     transport_state: Option<TransportState>,
     initiator: bool,
-    static_key: SigningKey,
+}
+
+fn build_keypair(key: &str) -> Result<Keypair, snow::Error> {
+    let decoded = SigningKey::from_pkcs8_pem(key).unwrap();
+    let keypair_bytes = decoded.to_keypair_bytes();
+    Ok(Keypair {
+        private: keypair_bytes[..SECRET_KEY_LENGTH].to_vec(),
+        public: keypair_bytes[SECRET_KEY_LENGTH..].to_vec(),
+    })
 }
 
 impl NoiseHandler {
@@ -55,23 +62,19 @@ impl NoiseHandler {
     ) -> Self {
         let parsed_pattern = PATTERN.parse().unwrap();
         let mut builder = snow::Builder::new(parsed_pattern);
-        // TODO: Read this static key from config file. Restarts should use the same key.
-        let keypair = builder.generate_keypair().unwrap();
+        let keypair = build_keypair(pem_key.as_str()).unwrap();
         builder = builder.local_private_key(&keypair.private);
         let handshake_state = if init {
             builder.build_initiator().unwrap()
         } else {
             builder.build_responder().unwrap()
         };
-        let decoded_private_key = SigningKey::from_pkcs8_pem(pem_key.as_str()).unwrap();
         NoiseHandler {
             handshake_state,
             transport_state: None,
-            keypair,
             read_channel_rx,
             write_channel_sx,
             initiator: init,
-            static_key: decoded_private_key,
         }
     }
 
