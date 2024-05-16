@@ -28,6 +28,8 @@ mod connection_reader;
 mod connection_writer;
 mod noise_handler;
 
+/// As things stand, connections are handled one at a time, so we
+/// don't access this hash map concurrently
 type ConnectionMap = HashMap<SocketAddr, mpsc::Sender<Bytes>>;
 
 #[derive(Debug)]
