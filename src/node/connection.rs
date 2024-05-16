@@ -40,11 +40,12 @@ pub struct Connection {
     writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
     read_channel: (mpsc::Sender<Bytes>, mpsc::Receiver<Bytes>),
     write_channel: (mpsc::Sender<Bytes>, mpsc::Receiver<Bytes>),
+    requests_receiver: mpsc::Receiver<Bytes>,
 }
 
 impl Connection {
     /// Build a new connection struct to work with the TcpStream
-    pub fn new(stream: TcpStream) -> Self {
+    pub fn new(stream: TcpStream, requests_receiver: mpsc::Receiver<Bytes>) -> Self {
         // Setup a length delimted codec for Noise
         let (r, w) = stream.into_split();
         let framed_reader = LengthDelimitedCodec::builder()
@@ -67,15 +68,22 @@ impl Connection {
             writer: framed_writer,
             read_channel,
             write_channel,
+            requests_receiver,
         }
     }
 
     pub async fn start(self, init: bool, pem_key: String) {
         let token = CancellationToken::new();
-        let cloned_token = token.clone();
+        let token_for_writer = token.clone();
+        // let token_for_requests = token.clone();
 
-        let noise_handler =
-            NoiseHandler::new(self.read_channel.1, self.write_channel.0, init, pem_key);
+        let mut noise_handler = NoiseHandler::new(
+            self.read_channel.1,
+            self.write_channel.0,
+            self.requests_receiver,
+            init,
+            pem_key,
+        );
 
         let mut connection_reader = ConnectionReader {
             send_channel: self.read_channel.0,
@@ -89,7 +97,7 @@ impl Connection {
         let mut connection_writer = ConnectionWriter {
             receive_channel: self.write_channel.1,
             framed_writer: self.writer,
-            cancel_token: cloned_token,
+            cancel_token: token_for_writer,
         };
         tokio::spawn(async move {
             connection_writer.start().await;
@@ -97,5 +105,7 @@ impl Connection {
 
         noise_handler.run_handshake().await;
         log::info!("Handshake complete");
+        noise_handler.start_transport().await;
+        log::info!("Connection cleanup");
     }
 }

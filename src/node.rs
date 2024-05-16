@@ -17,20 +17,25 @@
 // <https://www.gnu.org/licenses/>.
 
 use crate::node::connection::Connection;
+use std::collections::HashMap;
+use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc;
+use tokio_util::bytes::Bytes;
 
 mod connection;
 mod connection_reader;
 mod connection_writer;
 mod noise_handler;
 
+type ConnectionMap = HashMap<SocketAddr, mpsc::Sender<Bytes>>;
+
 #[derive(Debug)]
 pub struct Node {
     pub seeds: Vec<String>,
     pub bind_address: String,
     pub static_key_pem: String,
-    //pub connections: Vec<Connection>,
-    //sender: mpsc::Sender<[u8]>,
+    pub connections_map: ConnectionMap,
 }
 
 impl Node {
@@ -40,6 +45,7 @@ impl Node {
             seeds: vec!["localhost:6680".to_string()],
             bind_address: "localhost".to_string(),
             static_key_pem: String::new(),
+            connections_map: ConnectionMap::new(),
         }
     }
 
@@ -82,13 +88,16 @@ impl Node {
         log::debug!("Start accepting...");
         loop {
             log::debug!("Waiting on accept...");
-            let (stream, socket) = listener.accept().await.unwrap();
-            log::info!("Accept connection from {}:{}", socket.ip(), socket.port());
+            let (stream, socket_addr) = listener.accept().await.unwrap();
+            log::info!("Accept connection from {}", socket_addr);
             let key = self.static_key_pem.clone();
+            let (requests_sender, requests_receiver) = mpsc::channel::<Bytes>(32);
             tokio::spawn(async move {
-                let connection = Connection::new(stream);
+                let connection = Connection::new(stream, requests_receiver);
                 connection.start(false, key).await;
             });
+            self.connections_map.insert(socket_addr, requests_sender);
+            self.send(socket_addr, Bytes::from("Hello world")).await;
         }
     }
 
@@ -99,13 +108,22 @@ impl Node {
             log::debug!("Connecting to seed {}", seed);
             let key = self.static_key_pem.clone();
             if let Ok(stream) = TcpStream::connect(seed).await {
+                let peer_addr = stream.peer_addr().unwrap();
+                let (requests_sender, requests_receiver) = mpsc::channel::<Bytes>(32);
                 tokio::spawn(async move {
-                    let connection = Connection::new(stream);
+                    let connection = Connection::new(stream, requests_receiver);
                     connection.start(true, key).await;
                 });
+                self.connections_map.insert(peer_addr, requests_sender);
             } else {
                 log::debug!("Failed to connect to seed {}", seed);
             }
         }
+    }
+
+    /// Send a message to a given node
+    pub async fn send(&self, addr: SocketAddr, message: Bytes) {
+        let sender = self.connections_map.get(&addr).unwrap();
+        let _ = sender.send(message).await;
     }
 }

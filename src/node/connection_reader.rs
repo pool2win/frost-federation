@@ -43,7 +43,7 @@ impl ConnectionReader {
                             Ok(message) => {
                                 log::debug!("Received from network ... {:?}", message);
                                 if let Err(e) = self.send_channel.send(message.freeze()).await {
-                                    log::debug!("Error en-queuing message: {}", e)
+                                    log::debug!("Error en-queuing message: {:?}", e);
                                 }
                             }
                             Err(e) => {
