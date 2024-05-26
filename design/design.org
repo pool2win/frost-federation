@@ -1,0 +1,135 @@
+
+* Network layer
+- Connection is an actor that owns TcpSTream and the corresponding
+  FramedRead/Write.
+- Node has multiple handles to the connection and sends messages. Each
+  protocol grabs a hanlde from Connection.
+  - Send a message
+  - Subscribe to receiving messages from connection
+- There are a number of protocols, the node will attach to the
+  connection
+  - Noise Handshake
+  - FROST DKG
+  - FROST Sign
+  - Membership management
+    - Add member
+    - Remove member
+  - Reliable broadcast of messages to all members - no consensus on this layer.
+
+* Connection Actor
+** Owns
+- TcpStream
+- FramedRead
+- FramedWrite
+- mpsc::Receiver<ConnectionMessage>
+
+** Execution
+- We need a state flag
+  - init
+  - in_handshake
+  - in_transport
+- In init and handshake state, only Handshake.* message are handled,
+  everything else results in an Error
+
+* ConnectionMessage
+** Owns
+- Bytes for message body and other message specific details
+- oneshot::Sender<ConnectionResult>
+
+** Message types
+- HandshakeSend
+- HandshakeSubscribe
+- Send
+- Subscribe
+
+* ConnectionHandler
+** Owns
+- mpsc::Sender<ConnectionMessage> [this is the other end of the channel that Connection Actor has]
+
+** Execution
+- Starts an actor by calling new on the ConnectionActor
+- The handle is cloned for each new protocol by Node
+
+* Node -> Procotocol Interaction
+- Node creates ConnectionHandle
+- Node creates handshake protocol, passing in the cloned handle
+- Protocols are also actors
+  - Each protocol gets a clone of the connection handle, so they can
+    send and subscribe to events from connection
+
+* ProtocolActor
+** Owns
+- mpsc::Receiver<ProtocolMessage>
+- ConnectionHandle [cloned by node before sending here]
+
+* ProtocolHandle
+- mspc::Sender<ProtocolMessage>
+
+* ProtocolMessage
+** Owns
+- Bytes to send
+- oneshot::Sender<ProtocolResult>
+
+** Message types
+- start
+- shutdown
+
+#+begin_src plantuml :results value file file :file images/class-diagram.png
+  @startuml
+  class Node
+  class ConnectionActor
+  class ConnectionHandle
+  class ConnectionMessage
+  class HandshakeSend
+  class HandshakeSubscribe
+  class Send
+  class Subscribe
+
+  ConnectionMessage <|-- HandshakeSend
+  ConnectionMessage <|-- HandshakeSubscribe
+  ConnectionMessage <|-- Send
+  ConnectionMessage <|-- Subscribe
+  @enduml
+#+end_src
+
+#+RESULTS:
+[[file:images/class-diagram.png]]
+
+#+begin_src plantuml :results value file file :file images/interaction-diagram.png
+  @startuml
+  group init
+  node --> connection_handle: new
+  connection_handle --> connection_actor: new and start
+  connection_actor --> connection_actor: start
+  connection_actor --> connection_handle: success
+    connection_handle --> node: success
+  end
+  group clone handle
+  node --> connection_handle: clone
+  connection_handle --> node: cloned
+  end
+  group Noise Handshake Protocol
+  node --> handshake_protocol_actor: new (cloned connection_handle)
+  handshake_protocol_actor --> connection_actor: subscribe
+  handshake_protocol_actor <--> connection_actor: send/receive handshake messages
+  handshake_protocol_actor --> node: handshake complete
+  end
+  group Noise Update to Transport
+  node --> connection_handle: update to transport
+  connection_handle --> connection_actor: update
+  connection_actor --> connection_actor: update state to transport
+  connection_actor --> connection_handle: success
+  connection_handle --> node: success
+  end
+  group DKG Protocol
+  node --> dkg_protocol_actor: new (cloned connection_handle)
+  node --> dkg_protocol_actor: start
+  dkg_protocol_actor --> connection_actor: subscribe
+  dkg_protocol_actor <--> connection_actor: send/receive handshake messages
+  dkg_protocol_actor --> node: dkg generated
+  end
+  @enduml
+#+end_src
+
+#+RESULTS:
+[[file:images/interaction-diagram.png]]
