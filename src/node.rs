@@ -17,24 +17,17 @@
 // <https://www.gnu.org/licenses/>.
 
 use crate::node::connection::ConnectionHandle;
-use std::collections::HashMap;
-use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
 use tokio_util::bytes::Bytes;
 
 mod connection;
-
-/// As things stand, connections are handled one at a time, so we
-/// don't access this hash map concurrently
-type ConnectionMap = HashMap<SocketAddr, ConnectionHandle>;
+mod protocol;
 
 #[derive(Debug)]
 pub struct Node {
     pub seeds: Vec<String>,
     pub bind_address: String,
     pub static_key_pem: String,
-    // pub connections_map: ConnectionMap,
 }
 
 impl Node {
@@ -44,7 +37,6 @@ impl Node {
             seeds: vec!["localhost:6680".to_string()],
             bind_address: "localhost".to_string(),
             static_key_pem: String::new(),
-            // connections_map: ConnectionMap::new(),
         }
     }
 
@@ -93,26 +85,16 @@ impl Node {
             let connection_handle = ConnectionHandle::new(stream);
             let send_connection_handle = connection_handle.clone();
 
-            // send demo hello world
-            let _ = send_connection_handle
-                .send(Bytes::from("Hello world"))
+            self.start_connection(connection_handle, send_connection_handle)
                 .await;
-
-            // start receiving messages
-            let mut receiver = connection_handle.start_subscription().await;
-            tokio::spawn(async move {
-                while let Some(result) = receiver.recv().await {
-                    log::info!("Received {:?}", result);
-                }
-                log::debug!("Closing accepted connection");
-            });
         }
     }
 
     /// Connect to all peers and start reader writer tasks
     pub async fn connect_to_seeds(&mut self) {
         log::debug!("Connecting to seeds...");
-        for seed in self.seeds.iter() {
+        let seeds = self.seeds.clone();
+        for seed in seeds.iter() {
             log::debug!("Connecting to seed {}", seed);
             let key = self.static_key_pem.clone();
             if let Ok(stream) = TcpStream::connect(seed).await {
@@ -120,24 +102,31 @@ impl Node {
                 let connection_handle = ConnectionHandle::new(stream);
                 let send_connection_handle = connection_handle.clone();
 
-                log::debug!("Sending hello....");
-                // send demo hello world
-                let _ = send_connection_handle
-                    .send(Bytes::from("Hello world"))
+                self.start_connection(connection_handle, send_connection_handle)
                     .await;
-                log::debug!("hello sent....");
-
-                // start receiving messages
-                let mut receiver = connection_handle.start_subscription().await;
-                log::debug!("Subscription started.....");
-                tokio::spawn(async move {
-                    while let Some(result) = receiver.recv().await {
-                        log::info!("Received {:?}", result);
-                    }
-                });
             } else {
                 log::debug!("Failed to connect to seed {}", seed);
             }
         }
+    }
+
+    pub async fn start_connection(
+        &mut self,
+        connection_handle: ConnectionHandle,
+        send_connection_handle: ConnectionHandle,
+    ) {
+        // send demo hello world
+        let _ = send_connection_handle
+            .send(Bytes::from("Hello world"))
+            .await;
+
+        // start receiving messages
+        let mut receiver = connection_handle.start_subscription().await;
+        tokio::spawn(async move {
+            while let Some(result) = receiver.recv().await {
+                log::info!("Received {:?}", result);
+            }
+            log::debug!("Closing accepted connection");
+        });
     }
 }
