@@ -16,37 +16,42 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
+use tokio::sync::oneshot::error::RecvError;
+
 use tokio::{
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
     },
-    sync::mpsc,
+    sync::{mpsc, oneshot},
 };
 use tokio_util::{
     bytes::Bytes,
     codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
-    sync::CancellationToken,
 };
 
-use crate::node::connection_reader::ConnectionReader;
-use crate::node::connection_writer::ConnectionWriter;
-
-use super::noise_handler::NoiseHandler;
-
 #[derive(Debug)]
-pub struct Connection {
-    reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
-    writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
-    read_channel: (mpsc::Sender<Bytes>, mpsc::Receiver<Bytes>),
-    write_channel: (mpsc::Sender<Bytes>, mpsc::Receiver<Bytes>),
-    requests_receiver: mpsc::Receiver<Bytes>,
+pub enum ConnectionMessage {
+    Send {
+        data: Bytes,
+        respond_to: oneshot::Sender<()>,
+    },
+    Subscribe {
+        respond_to: mpsc::Sender<Bytes>,
+    },
 }
 
-impl Connection {
+#[derive(Debug)]
+pub struct ConnectionActor {
+    reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
+    writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
+    receiver: mpsc::Receiver<ConnectionMessage>,
+}
+
+impl ConnectionActor {
     /// Build a new connection struct to work with the TcpStream
-    pub fn new(stream: TcpStream, requests_receiver: mpsc::Receiver<Bytes>) -> Self {
-        // Setup a length delimted codec for Noise
+    pub fn new(stream: TcpStream, receiver: mpsc::Receiver<ConnectionMessage>) -> Self {
+        // Set up a length delimted codec for Noise
         let (r, w) = stream.into_split();
         let framed_reader = LengthDelimitedCodec::builder()
             .length_field_offset(0)
@@ -59,53 +64,90 @@ impl Connection {
             .length_adjustment(0)
             .new_write(w);
 
-        // Create a channel to buffer read processing
-        let read_channel = mpsc::channel::<Bytes>(32);
-        // Create a channel to buffer write processing
-        let write_channel = mpsc::channel::<Bytes>(32);
-        Connection {
+        ConnectionActor {
             reader: framed_reader,
             writer: framed_writer,
-            read_channel,
-            write_channel,
-            requests_receiver,
+            receiver,
         }
     }
 
-    pub async fn start(self, init: bool, pem_key: String) {
-        let token = CancellationToken::new();
-        let token_for_writer = token.clone();
-        // let token_for_requests = token.clone();
+    pub async fn handle_message(&mut self, msg: ConnectionMessage) {
+        log::debug!("Handle message : {:?}", msg);
+        match msg {
+            ConnectionMessage::Send { data, respond_to } => {
+                self.handle_send(data, respond_to).await
+            }
+            ConnectionMessage::Subscribe { respond_to } => self.handle_subscribe(respond_to).await,
+        }
+    }
 
-        let mut noise_handler = NoiseHandler::new(
-            self.read_channel.1,
-            self.write_channel.0,
-            self.requests_receiver,
-            init,
-            pem_key,
-        );
+    pub async fn handle_send(&mut self, data: Bytes, respond_to: oneshot::Sender<()>) {
+        // Bring SinkExt in scope for access to `send` calls
+        use futures::sink::SinkExt;
 
-        let mut connection_reader = ConnectionReader {
-            send_channel: self.read_channel.0,
-            framed_reader: self.reader,
-            cancel_token: token,
+        log::debug!("Handle send...");
+        if self.writer.send(data).await.is_err() {
+            log::info!("Closing connection");
+            let _ = respond_to.send(());
+        }
+    }
+
+    pub async fn handle_subscribe(&mut self, respond_to: mpsc::Sender<Bytes>) {
+        // Bring StreamExt in scope for access to `next` calls
+        use tokio_stream::StreamExt;
+
+        while let Some(data) = self.reader.next().await {
+            match data {
+                Ok(msg) => {
+                    let _ = respond_to.send(msg.freeze()).await;
+                }
+                Err(_) => {
+                    log::info!("Error sending message to subscriber");
+                    return;
+                }
+            }
+        }
+    }
+}
+
+pub async fn run_connection_actor(mut actor: ConnectionActor) {
+    while let Some(msg) = actor.receiver.recv().await {
+        log::debug!("in runner... {:?}", msg);
+        actor.handle_message(msg).await;
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ConnectionHandle {
+    sender: mpsc::Sender<ConnectionMessage>,
+}
+
+impl ConnectionHandle {
+    pub fn new(tcp_stream: TcpStream) -> Self {
+        let (sender, receiver) = mpsc::channel(32);
+        let connection_actor = ConnectionActor::new(tcp_stream, receiver);
+        tokio::spawn(run_connection_actor(connection_actor));
+
+        Self { sender }
+    }
+
+    pub async fn send(&self, data: Bytes) -> Result<(), RecvError> {
+        let (sender, receiver) = oneshot::channel();
+        let msg = ConnectionMessage::Send {
+            data,
+            respond_to: sender,
         };
-        tokio::spawn(async move {
-            connection_reader.start().await;
-        });
+        let _ = self.sender.send(msg).await;
+        log::debug!("Send returning... ");
+        receiver.await
+    }
 
-        let mut connection_writer = ConnectionWriter {
-            receive_channel: self.write_channel.1,
-            framed_writer: self.writer,
-            cancel_token: token_for_writer,
-        };
-        tokio::spawn(async move {
-            connection_writer.start().await;
-        });
+    pub async fn start_subscription(&self) -> mpsc::Receiver<Bytes> {
+        let (send, recv) = mpsc::channel(32);
+        let msg = ConnectionMessage::Subscribe { respond_to: send };
 
-        noise_handler.run_handshake().await;
-        log::info!("Handshake complete");
-        noise_handler.start_transport().await;
-        log::info!("Connection cleanup");
+        let _ = self.sender.send(msg).await;
+        log::debug!("Start subscription returning... ");
+        recv
     }
 }

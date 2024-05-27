@@ -16,7 +16,7 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use crate::node::connection::Connection;
+use crate::node::connection::ConnectionHandle;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
@@ -24,20 +24,17 @@ use tokio::sync::mpsc;
 use tokio_util::bytes::Bytes;
 
 mod connection;
-mod connection_reader;
-mod connection_writer;
-mod noise_handler;
 
 /// As things stand, connections are handled one at a time, so we
 /// don't access this hash map concurrently
-type ConnectionMap = HashMap<SocketAddr, mpsc::Sender<Bytes>>;
+type ConnectionMap = HashMap<SocketAddr, ConnectionHandle>;
 
 #[derive(Debug)]
 pub struct Node {
     pub seeds: Vec<String>,
     pub bind_address: String,
     pub static_key_pem: String,
-    pub connections_map: ConnectionMap,
+    // pub connections_map: ConnectionMap,
 }
 
 impl Node {
@@ -47,7 +44,7 @@ impl Node {
             seeds: vec!["localhost:6680".to_string()],
             bind_address: "localhost".to_string(),
             static_key_pem: String::new(),
-            connections_map: ConnectionMap::new(),
+            // connections_map: ConnectionMap::new(),
         }
     }
 
@@ -93,13 +90,22 @@ impl Node {
             let (stream, socket_addr) = listener.accept().await.unwrap();
             log::info!("Accept connection from {}", socket_addr);
             let key = self.static_key_pem.clone();
-            let (requests_sender, requests_receiver) = mpsc::channel::<Bytes>(32);
+            let connection_handle = ConnectionHandle::new(stream);
+            let send_connection_handle = connection_handle.clone();
+
+            // send demo hello world
+            let _ = send_connection_handle
+                .send(Bytes::from("Hello world"))
+                .await;
+
+            // start receiving messages
+            let mut receiver = connection_handle.start_subscription().await;
             tokio::spawn(async move {
-                let connection = Connection::new(stream, requests_receiver);
-                connection.start(false, key).await;
+                while let Some(result) = receiver.recv().await {
+                    log::info!("Received {:?}", result);
+                }
+                log::debug!("Closing accepted connection");
             });
-            self.connections_map.insert(socket_addr, requests_sender);
-            self.send(socket_addr, Bytes::from("Hello world")).await;
         }
     }
 
@@ -111,21 +117,27 @@ impl Node {
             let key = self.static_key_pem.clone();
             if let Ok(stream) = TcpStream::connect(seed).await {
                 let peer_addr = stream.peer_addr().unwrap();
-                let (requests_sender, requests_receiver) = mpsc::channel::<Bytes>(32);
+                let connection_handle = ConnectionHandle::new(stream);
+                let send_connection_handle = connection_handle.clone();
+
+                log::debug!("Sending hello....");
+                // send demo hello world
+                let _ = send_connection_handle
+                    .send(Bytes::from("Hello world"))
+                    .await;
+                log::debug!("hello sent....");
+
+                // start receiving messages
+                let mut receiver = connection_handle.start_subscription().await;
+                log::debug!("Subscription started.....");
                 tokio::spawn(async move {
-                    let connection = Connection::new(stream, requests_receiver);
-                    connection.start(true, key).await;
+                    while let Some(result) = receiver.recv().await {
+                        log::info!("Received {:?}", result);
+                    }
                 });
-                self.connections_map.insert(peer_addr, requests_sender);
             } else {
                 log::debug!("Failed to connect to seed {}", seed);
             }
         }
-    }
-
-    /// Send a message to a given node
-    pub async fn send(&self, addr: SocketAddr, message: Bytes) {
-        let sender = self.connections_map.get(&addr).unwrap();
-        let _ = sender.send(message).await;
     }
 }
