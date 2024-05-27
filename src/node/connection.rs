@@ -72,7 +72,6 @@ impl ConnectionActor {
     }
 
     pub async fn handle_message(&mut self, msg: ConnectionMessage) {
-        log::debug!("Handle message : {:?}", msg);
         match msg {
             ConnectionMessage::Send { data, respond_to } => {
                 self.handle_send(data, respond_to).await
@@ -85,7 +84,6 @@ impl ConnectionActor {
         // Bring SinkExt in scope for access to `send` calls
         use futures::sink::SinkExt;
 
-        log::debug!("Handle send...");
         if self.writer.send(data).await.is_err() {
             log::info!("Closing connection");
             let _ = respond_to.send(());
@@ -112,7 +110,6 @@ impl ConnectionActor {
 
 pub async fn run_connection_actor(mut actor: ConnectionActor) {
     while let Some(msg) = actor.receiver.recv().await {
-        log::debug!("in runner... {:?}", msg);
         actor.handle_message(msg).await;
     }
 }
@@ -138,7 +135,6 @@ impl ConnectionHandle {
             respond_to: sender,
         };
         let _ = self.sender.send(msg).await;
-        log::debug!("Send returning... ");
         receiver.await
     }
 
@@ -147,7 +143,6 @@ impl ConnectionHandle {
         let msg = ConnectionMessage::Subscribe { respond_to: send };
 
         let _ = self.sender.send(msg).await;
-        log::debug!("Start subscription returning... ");
         recv
     }
 }

@@ -99,6 +99,7 @@ impl Node {
             let key = self.static_key_pem.clone();
             if let Ok(stream) = TcpStream::connect(seed).await {
                 let peer_addr = stream.peer_addr().unwrap();
+                log::info!("Connected to {}", peer_addr);
                 let connection_handle = ConnectionHandle::new(stream);
                 let send_connection_handle = connection_handle.clone();
 
