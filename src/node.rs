@@ -18,8 +18,8 @@
 
 use crate::node::connection::ConnectionHandle;
 use tokio::net::{TcpListener, TcpStream};
-use tokio_util::bytes::Bytes;
 
+use self::protocol::{PingMessage, ProtocolMessage};
 mod connection;
 mod protocol;
 
@@ -83,10 +83,8 @@ impl Node {
             log::info!("Accept connection from {}", socket_addr);
             let key = self.static_key_pem.clone();
             let connection_handle = ConnectionHandle::new(stream);
-            let send_connection_handle = connection_handle.clone();
 
-            self.start_connection(connection_handle, send_connection_handle)
-                .await;
+            self.start_connection(connection_handle).await;
         }
     }
 
@@ -101,33 +99,15 @@ impl Node {
                 let peer_addr = stream.peer_addr().unwrap();
                 log::info!("Connected to {}", peer_addr);
                 let connection_handle = ConnectionHandle::new(stream);
-                let send_connection_handle = connection_handle.clone();
 
-                self.start_connection(connection_handle, send_connection_handle)
-                    .await;
+                self.start_connection(connection_handle).await;
             } else {
                 log::debug!("Failed to connect to seed {}", seed);
             }
         }
     }
 
-    pub async fn start_connection(
-        &mut self,
-        connection_handle: ConnectionHandle,
-        send_connection_handle: ConnectionHandle,
-    ) {
-        // send demo hello world
-        let _ = send_connection_handle
-            .send(Bytes::from("Hello world"))
-            .await;
-
-        // start receiving messages
-        let mut receiver = connection_handle.start_subscription().await;
-        tokio::spawn(async move {
-            while let Some(result) = receiver.recv().await {
-                log::info!("Received {:?}", result);
-            }
-            log::debug!("Closing accepted connection");
-        });
+    pub async fn start_connection(&mut self, connection_handle: ConnectionHandle) {
+        protocol::start_protocol::<PingMessage>(connection_handle).await;
     }
 }

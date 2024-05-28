@@ -110,8 +110,11 @@ impl ConnectionActor {
 
 pub async fn run_connection_actor(mut actor: ConnectionActor) {
     while let Some(msg) = actor.receiver.recv().await {
+        log::debug!("Calling handle message for {:?}", msg);
         actor.handle_message(msg).await;
+        log::debug!("Handle message returned");
     }
+    log::debug!("Run loop ending");
 }
 
 #[derive(Clone, Debug)]
@@ -129,12 +132,14 @@ impl ConnectionHandle {
     }
 
     pub async fn send(&self, data: Bytes) -> Result<(), RecvError> {
+        log::debug!("In handle#send for {:?}", data);
         let (sender, receiver) = oneshot::channel();
         let msg = ConnectionMessage::Send {
             data,
             respond_to: sender,
         };
         let _ = self.sender.send(msg).await;
+        log::debug!("After sender.send");
         receiver.await
     }
 
