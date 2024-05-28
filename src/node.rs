@@ -19,7 +19,7 @@
 use crate::node::connection::ConnectionHandle;
 use tokio::net::{TcpListener, TcpStream};
 
-use self::protocol::{PingMessage, ProtocolMessage};
+use self::protocol::HandshakeMessage;
 mod connection;
 mod protocol;
 
@@ -83,8 +83,7 @@ impl Node {
             log::info!("Accept connection from {}", socket_addr);
             let key = self.static_key_pem.clone();
             let connection_handle = ConnectionHandle::new(stream);
-
-            self.start_connection(connection_handle).await;
+            self.start_connection(connection_handle, true).await;
         }
     }
 
@@ -99,15 +98,14 @@ impl Node {
                 let peer_addr = stream.peer_addr().unwrap();
                 log::info!("Connected to {}", peer_addr);
                 let connection_handle = ConnectionHandle::new(stream);
-
-                self.start_connection(connection_handle).await;
+                self.start_connection(connection_handle, false).await;
             } else {
                 log::debug!("Failed to connect to seed {}", seed);
             }
         }
     }
 
-    pub async fn start_connection(&mut self, connection_handle: ConnectionHandle) {
-        protocol::start_protocol::<PingMessage>(connection_handle).await;
+    pub async fn start_connection(&mut self, connection_handle: ConnectionHandle, init: bool) {
+        protocol::start_protocol::<HandshakeMessage>(connection_handle, init).await;
     }
 }

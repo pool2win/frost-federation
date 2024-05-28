@@ -30,6 +30,9 @@ use tokio_util::{
     codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
 };
 
+// Bring StreamExt in scope for access to `next` calls
+use tokio_stream::StreamExt;
+
 #[derive(Debug)]
 pub enum ConnectionMessage {
     Send {
@@ -46,6 +49,7 @@ pub struct ConnectionActor {
     reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
     writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
     receiver: mpsc::Receiver<ConnectionMessage>,
+    subscribers: Vec<mpsc::Sender<Bytes>>,
 }
 
 impl ConnectionActor {
@@ -68,6 +72,7 @@ impl ConnectionActor {
             reader: framed_reader,
             writer: framed_writer,
             receiver,
+            subscribers: vec![],
         }
     }
 
@@ -91,30 +96,30 @@ impl ConnectionActor {
     }
 
     pub async fn handle_subscribe(&mut self, respond_to: mpsc::Sender<Bytes>) {
-        // Bring StreamExt in scope for access to `next` calls
-        use tokio_stream::StreamExt;
+        self.subscribers.push(respond_to);
+    }
 
-        while let Some(data) = self.reader.next().await {
-            match data {
-                Ok(msg) => {
-                    let _ = respond_to.send(msg.freeze()).await;
-                }
-                Err(_) => {
-                    log::info!("Error sending message to subscriber");
-                    return;
-                }
-            }
+    pub async fn update_subscribers(&mut self, message: Bytes) {
+        log::debug!("Updating subscribers... {}", self.subscribers.len());
+        for subscriber in &self.subscribers {
+            let _ = subscriber.send(message.clone()).await;
         }
     }
 }
 
 pub async fn run_connection_actor(mut actor: ConnectionActor) {
-    while let Some(msg) = actor.receiver.recv().await {
-        log::debug!("Calling handle message for {:?}", msg);
-        actor.handle_message(msg).await;
-        log::debug!("Handle message returned");
+    loop {
+        tokio::select! {
+            Some(message) = actor.receiver.recv() => {
+                actor.handle_message(message).await;
+            }
+            Some(message) = actor.reader.next() => {
+                let msg = message.unwrap().freeze();
+                log::debug!("Received from network {:?}", msg.clone());
+                actor.update_subscribers(msg.clone()).await;
+            }
+        }
     }
-    log::debug!("Run loop ending");
 }
 
 #[derive(Clone, Debug)]
@@ -144,10 +149,12 @@ impl ConnectionHandle {
     }
 
     pub async fn start_subscription(&self) -> mpsc::Receiver<Bytes> {
-        let (send, recv) = mpsc::channel(32);
-        let msg = ConnectionMessage::Subscribe { respond_to: send };
+        let (subscription_sender, subscription_receiver) = mpsc::channel(32);
+        let msg = ConnectionMessage::Subscribe {
+            respond_to: subscription_sender,
+        };
 
         let _ = self.sender.send(msg).await;
-        recv
+        subscription_receiver
     }
 }

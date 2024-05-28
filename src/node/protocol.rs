@@ -24,20 +24,20 @@ extern crate serde;
 // extern crate serde_derive;
 use serde::{Deserialize, Serialize};
 
-// mod handshake;
-// mod heartbeat;
+mod handshake;
+mod heartbeat;
 mod ping;
 
-// pub use handshake::HandshakeMessage;
-// pub use heartbeat::HeartbeatMessage;
+pub use handshake::HandshakeMessage;
+pub use heartbeat::HeartbeatMessage;
 pub use ping::PingMessage;
 
 use super::connection::ConnectionHandle;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub enum Message {
-    // Handshake(HandshakeMessage),
-    // Heartbeat(HeartbeatMessage),
+    Handshake(HandshakeMessage),
+    Heartbeat(HeartbeatMessage),
     Ping(PingMessage),
 }
 
@@ -58,19 +58,21 @@ impl Message {
     /// Generates the response to send for a message received
     pub fn response_for_received(&self) -> Result<Option<Message>, String> {
         match self {
-            // Message::Handshake(m) => m.response_for_received(),
-            // Message::Heartbeat(m) => m.response_for_received(),
+            Message::Handshake(m) => m.response_for_received(),
+            Message::Heartbeat(m) => m.response_for_received(),
             Message::Ping(m) => m.response_for_received(),
         }
     }
 }
 
-pub async fn start_protocol<M>(handle: ConnectionHandle)
+pub async fn start_protocol<M>(handle: ConnectionHandle, init: bool)
 where
     M: ProtocolMessage,
 {
-    if let Some(message) = M::start() {
-        let _ = handle.send(message.as_bytes().unwrap()).await;
+    if init {
+        if let Some(message) = M::start() {
+            let _ = handle.send(message.as_bytes().unwrap()).await;
+        }
     }
 
     // start receiving messages
