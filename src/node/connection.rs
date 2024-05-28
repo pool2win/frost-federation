@@ -54,7 +54,11 @@ pub struct ConnectionActor {
 
 impl ConnectionActor {
     /// Build a new connection struct to work with the TcpStream
-    pub fn new(stream: TcpStream, receiver: mpsc::Receiver<ConnectionMessage>) -> Self {
+    pub fn new(
+        stream: TcpStream,
+        receiver: mpsc::Receiver<ConnectionMessage>,
+        subscription_sender: mpsc::Sender<Bytes>,
+    ) -> Self {
         // Set up a length delimted codec for Noise
         let (r, w) = stream.into_split();
         let framed_reader = LengthDelimitedCodec::builder()
@@ -72,7 +76,7 @@ impl ConnectionActor {
             reader: framed_reader,
             writer: framed_writer,
             receiver,
-            subscribers: vec![],
+            subscribers: vec![subscription_sender],
         }
     }
 
@@ -128,33 +132,33 @@ pub struct ConnectionHandle {
 }
 
 impl ConnectionHandle {
-    pub fn new(tcp_stream: TcpStream) -> Self {
+    pub fn start(tcp_stream: TcpStream) -> (Self, mpsc::Receiver<Bytes>) {
         let (sender, receiver) = mpsc::channel(32);
-        let connection_actor = ConnectionActor::new(tcp_stream, receiver);
+        let (subscription_sender, subscription_receiver) = mpsc::channel(32);
+
+        let connection_actor = ConnectionActor::new(tcp_stream, receiver, subscription_sender);
         tokio::spawn(run_connection_actor(connection_actor));
 
-        Self { sender }
+        (Self { sender }, subscription_receiver)
     }
 
     pub async fn send(&self, data: Bytes) -> Result<(), RecvError> {
-        log::debug!("In handle#send for {:?}", data);
         let (sender, receiver) = oneshot::channel();
         let msg = ConnectionMessage::Send {
             data,
             respond_to: sender,
         };
         let _ = self.sender.send(msg).await;
-        log::debug!("After sender.send");
         receiver.await
     }
 
-    pub async fn start_subscription(&self) -> mpsc::Receiver<Bytes> {
-        let (subscription_sender, subscription_receiver) = mpsc::channel(32);
-        let msg = ConnectionMessage::Subscribe {
-            respond_to: subscription_sender,
-        };
+    // pub async fn add_subscription(&self) -> mpsc::Receiver<Bytes> {
+    //     let (subscription_sender, subscription_receiver) = mpsc::channel(32);
+    //     let msg = ConnectionMessage::Subscribe {
+    //         respond_to: subscription_sender,
+    //     };
 
-        let _ = self.sender.send(msg).await;
-        subscription_receiver
-    }
+    //     let _ = self.sender.send(msg).await;
+    //     subscription_receiver
+    // }
 }

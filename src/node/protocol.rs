@@ -74,20 +74,6 @@ where
             let _ = handle.send(message.as_bytes().unwrap()).await;
         }
     }
-
-    // start receiving messages
-    let mut receiver = handle.clone().start_subscription().await;
-    tokio::spawn(async move {
-        while let Some(result) = receiver.recv().await {
-            let received_message = Message::from_bytes(&result).unwrap();
-            log::debug!("Received {:?}", received_message);
-            if let Some(response) = received_message.response_for_received().unwrap() {
-                log::debug!("Sending Response {:?}", response);
-                let _ = handle.send(response.as_bytes().unwrap()).await;
-            }
-        }
-        log::debug!("Closing accepted connection");
-    });
 }
 
 /// Trait implemented by all protocol messages
