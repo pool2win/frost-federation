@@ -152,13 +152,13 @@ impl ConnectionHandle {
         receiver.await
     }
 
-    // pub async fn add_subscription(&self) -> mpsc::Receiver<Bytes> {
-    //     let (subscription_sender, subscription_receiver) = mpsc::channel(32);
-    //     let msg = ConnectionMessage::Subscribe {
-    //         respond_to: subscription_sender,
-    //     };
+    pub async fn add_subscription(&self) -> mpsc::Receiver<Bytes> {
+        let (subscription_sender, subscription_receiver) = mpsc::channel(32);
+        let msg = ConnectionMessage::Subscribe {
+            respond_to: subscription_sender,
+        };
 
-    //     let _ = self.sender.send(msg).await;
-    //     subscription_receiver
-    // }
+        let _ = self.sender.send(msg).await;
+        subscription_receiver
+    }
 }

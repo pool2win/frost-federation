@@ -32,7 +32,6 @@ impl ProtocolMessage for PingMessage {
     }
 
     fn response_for_received(&self) -> Result<Option<Message>, String> {
-        log::info!("Received in protocol {:?}", self.message);
         if self.message == "ping" {
             Ok(Some(Message::Ping(PingMessage {
                 message: String::from("pong"),
