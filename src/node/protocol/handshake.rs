@@ -16,9 +16,10 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
+use crate::node::protocol::PingMessage;
+
 use super::{Message, ProtocolMessage};
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct HandshakeMessage {
@@ -44,7 +45,7 @@ impl ProtocolMessage for HandshakeMessage {
                 })))
             }
             HandshakeMessage { message, version } if message == "oleh" && version == "0.1.0" => {
-                Ok(None)
+                Ok(PingMessage::start())
             }
             _ => Err("Bad message".to_string()),
         }
