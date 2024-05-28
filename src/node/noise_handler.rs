@@ -156,22 +156,16 @@ impl NoiseHandler {
     /// Run initiator handshake steps. The steps here depend on the
     /// Noise protocol being used
     async fn initiator_handshake(&mut self) {
-        // -> e
-        self.send_handshake_message(b"").await;
-
-        self.read_handshake_message().await;
-        // // -> s, se
-        self.send_handshake_message(b"").await;
+        self.send_handshake_message(b"").await; // send -> e
+        self.read_handshake_message().await; // receive <- e, ee, s, es
+        self.send_handshake_message(b"").await; // send -> s, se
     }
 
     /// Run initiator handshake steps. The steps here depend on the
     /// Noise protocol being used
     async fn responder_handshake(&mut self) {
-        self.read_handshake_message().await;
-        // <- e, ee, s, es
-        self.send_handshake_message(b"").await;
-
-        // read -> s, se to complete handshake
-        self.read_handshake_message().await;
+        self.read_handshake_message().await; // receive -> e
+        self.send_handshake_message(b"").await; // send <- e, ee, s, es
+        self.read_handshake_message().await; // receive -> s, se
     }
 }
