@@ -16,9 +16,7 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use crate::node::protocol::PingMessage;
-
-use super::{Message, ProtocolMessage};
+use super::{Message, PingMessage, ProtocolMessage};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]

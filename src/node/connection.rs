@@ -122,6 +122,7 @@ pub async fn run_connection_actor(mut actor: ConnectionActor) {
                 log::debug!("Received from network {:?}", msg.clone());
                 actor.update_subscribers(msg.clone()).await;
             }
+            else => ()
         }
     }
 }

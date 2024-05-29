@@ -22,6 +22,8 @@ use snow::{HandshakeState, Keypair, TransportState};
 use tokio::sync::mpsc;
 use tokio_util::bytes::Bytes;
 
+use super::connection::ConnectionHandle;
+
 // TODO[pool2win]: Change this to XK once we have setup pubkey as node id
 //
 // We use 25519 instead of LN's choice of secp256k1 as
@@ -32,24 +34,14 @@ use tokio_util::bytes::Bytes;
 static PATTERN: &str = "Noise_XX_25519_ChaChaPoly_SHA256";
 const NOISE_MAX_MSG_LENGTH: usize = 65535;
 
-/// Hold all the noise handshake and transport states as well as the
-/// various channels to send/receive messages from protocols and
-/// socket stream
-///
+/// Hold all the noise handshake and transport states
 /// Noise handler reads and writes messages according to the noise
 /// protocol used. The handler provides confidential and authenticated
 /// channels between two peers.
 pub struct NoiseHandler {
-    /// Channel Sender that is consumed by Connection to write to
-    /// framed writer
-    write_channel_sx: mpsc::Sender<Bytes>,
-    /// Channel Receiver that consumes messages produced by
-    /// Connection's framed reader
-    read_channel_rx: mpsc::Receiver<Bytes>,
     handshake_state: Option<HandshakeState>,
     transport_state: Option<TransportState>,
     initiator: bool,
-    requests_receiver: mpsc::Receiver<Bytes>,
 }
 
 fn build_keypair(key: &str) -> Result<Keypair, snow::Error> {
@@ -62,13 +54,7 @@ fn build_keypair(key: &str) -> Result<Keypair, snow::Error> {
 }
 
 impl NoiseHandler {
-    pub fn new(
-        read_channel_rx: mpsc::Receiver<Bytes>,
-        write_channel_sx: mpsc::Sender<Bytes>,
-        requests_receiver: mpsc::Receiver<Bytes>,
-        init: bool,
-        pem_key: String,
-    ) -> Self {
+    pub fn new(init: bool, pem_key: String) -> Self {
         let parsed_pattern = PATTERN.parse().unwrap();
         let mut builder = snow::Builder::new(parsed_pattern);
         let keypair = build_keypair(pem_key.as_str()).unwrap();
@@ -81,10 +67,7 @@ impl NoiseHandler {
         NoiseHandler {
             handshake_state,
             transport_state: None,
-            read_channel_rx,
-            write_channel_sx,
             initiator: init,
-            requests_receiver,
         }
     }
 
@@ -92,42 +75,24 @@ impl NoiseHandler {
     pub async fn start_transport(mut self) {
         let state = self.handshake_state.take();
         self.transport_state = Some(state.unwrap().into_transport_mode().unwrap());
-        self.start_receiving_requests().await;
-    }
-
-    /// Start receiving messages from higher layers/protocols to send
-    /// to the peer
-    pub async fn start_receiving_requests(mut self) {
-        loop {
-            if let Some(message) = self.requests_receiver.recv().await {
-                log::debug!("Sending message {:?}", message);
-                let mut buf = [0u8; NOISE_MAX_MSG_LENGTH];
-                let len = self
-                    .transport_state
-                    .as_mut()
-                    .unwrap()
-                    .write_message(&message, &mut buf)
-                    .unwrap();
-                let _ = self
-                    .write_channel_sx
-                    .send(Bytes::from_iter(buf).slice(0..len))
-                    .await;
-            }
-        }
     }
 
     /// Run the Noise handshake protocol for initiator or responder as
     /// the case may be
-    pub async fn run_handshake(&mut self) {
+    pub async fn run_handshake(
+        &mut self,
+        connection_handle: ConnectionHandle,
+        receiver: mpsc::Receiver<Bytes>,
+    ) -> mpsc::Receiver<Bytes> {
         if self.initiator {
-            self.initiator_handshake().await;
+            self.initiator_handshake(connection_handle, receiver).await
         } else {
-            self.responder_handshake().await;
+            self.responder_handshake(connection_handle, receiver).await
         }
     }
 
-    /// Send a handshake message (using the handshake state)
-    async fn send_handshake_message(&mut self, message: &[u8]) {
+    /// Build a handshake message (using the handshake state)
+    pub fn build_handshake_message(&mut self, message: &[u8]) -> Bytes {
         let mut buf = [0u8; NOISE_MAX_MSG_LENGTH];
         let len = self
             .handshake_state
@@ -135,37 +100,56 @@ impl NoiseHandler {
             .unwrap()
             .write_message(message, &mut buf)
             .unwrap();
-        let _ = self
-            .write_channel_sx
-            .send(Bytes::from_iter(buf).slice(0..len))
-            .await;
+        Bytes::from_iter(buf).slice(0..len)
     }
 
     /// Read handshake message (using the handshake state)
-    async fn read_handshake_message(&mut self) {
+    pub fn read_handshake_message(&mut self, msg: Bytes) -> Bytes {
         let mut buf = [0u8; NOISE_MAX_MSG_LENGTH];
-        let msg = self.read_channel_rx.recv().await.unwrap();
-        let _len = self
+        let len = self
             .handshake_state
             .as_mut()
             .unwrap()
             .read_message(&msg, &mut buf[..msg.len()])
             .unwrap();
+        Bytes::from_iter(buf).slice(0..len)
     }
 
     /// Run initiator handshake steps. The steps here depend on the
     /// Noise protocol being used
-    async fn initiator_handshake(&mut self) {
-        self.send_handshake_message(b"").await; // send -> e
-        self.read_handshake_message().await; // receive <- e, ee, s, es
-        self.send_handshake_message(b"").await; // send -> s, se
+    async fn initiator_handshake(
+        &mut self,
+        connection_handle: ConnectionHandle,
+        mut receiver: mpsc::Receiver<Bytes>,
+    ) -> mpsc::Receiver<Bytes> {
+        let m1 = self.build_handshake_message(b"-> e");
+        let _ = connection_handle.send(m1).await;
+
+        let m2 = receiver.recv().await.unwrap();
+        let _ = self.read_handshake_message(m2);
+
+        let m3 = self.build_handshake_message(b"-> s, se");
+        let _ = connection_handle.send(m3).await;
+        log::info!("Noise channel ready");
+        receiver
     }
 
     /// Run initiator handshake steps. The steps here depend on the
     /// Noise protocol being used
-    async fn responder_handshake(&mut self) {
-        self.read_handshake_message().await; // receive -> e
-        self.send_handshake_message(b"").await; // send <- e, ee, s, es
-        self.read_handshake_message().await; // receive -> s, se
+    async fn responder_handshake(
+        &mut self,
+        connection_handle: ConnectionHandle,
+        mut receiver: mpsc::Receiver<Bytes>,
+    ) -> mpsc::Receiver<Bytes> {
+        let m1 = receiver.recv().await.unwrap();
+        let _ = self.read_handshake_message(m1);
+
+        let m2 = self.build_handshake_message(b"<- e, ee, s, es");
+        let _ = connection_handle.send(m2).await;
+
+        let m3 = receiver.recv().await.unwrap();
+        let _ = self.read_handshake_message(m3);
+        log::info!("Noise channel ready");
+        receiver
     }
 }
