@@ -30,12 +30,18 @@ use tokio_util::{
 };
 // Bring StreamExt in scope for access to `next` calls
 use tokio_stream::StreamExt;
+// Bring SinkExt in scope for access to `send` calls
+use futures::sink::SinkExt;
 
 use super::noise_handler::NoiseHandler;
 
 #[derive(Debug)]
 pub enum ConnectionMessage {
     Send {
+        data: Bytes,
+        respond_to: oneshot::Sender<()>,
+    },
+    SendClearText {
         data: Bytes,
         respond_to: oneshot::Sender<()>,
     },
@@ -95,14 +101,23 @@ impl ConnectionActor {
             ConnectionMessage::Send { data, respond_to } => {
                 self.handle_send(data, respond_to).await
             }
+            ConnectionMessage::SendClearText { data, respond_to } => {
+                self.handle_send_clear_text(data, respond_to).await
+            }
             ConnectionMessage::Subscribe { respond_to } => self.handle_subscribe(respond_to).await,
         }
     }
 
     pub async fn handle_send(&mut self, data: Bytes, respond_to: oneshot::Sender<()>) {
-        // Bring SinkExt in scope for access to `send` calls
-        use futures::sink::SinkExt;
+        log::debug!("handle_send {:?}", data);
+        let data = self.noise.build_transport_message(&data);
+        if self.writer.send(data).await.is_err() {
+            log::info!("Closing connection");
+            let _ = respond_to.send(());
+        }
+    }
 
+    pub async fn handle_send_clear_text(&mut self, data: Bytes, respond_to: oneshot::Sender<()>) {
         if self.writer.send(data).await.is_err() {
             log::info!("Closing connection");
             let _ = respond_to.send(());
@@ -115,8 +130,9 @@ impl ConnectionActor {
 
     pub async fn update_subscribers(&mut self, message: Bytes) {
         log::debug!("Updating subscribers... {}", self.subscribers.len());
+        let decrypted_message = self.noise.read_transport_message(message);
         for subscriber in &self.subscribers {
-            let _ = subscriber.send(message.clone()).await;
+            let _ = subscriber.send(decrypted_message.clone()).await;
         }
     }
 }
@@ -124,10 +140,10 @@ impl ConnectionActor {
 pub async fn run_connection_actor(mut actor: ConnectionActor) {
     loop {
         tokio::select! {
-            Some(message) = actor.receiver.recv() => {
+            Some(message) = actor.receiver.recv() => { // read next command from handle
                 actor.handle_message(message).await;
             }
-            Some(message) = actor.reader.next() => {
+            Some(message) = actor.reader.next() => { // read next message from network
                 let msg = message.unwrap().freeze();
                 log::debug!("Received from network {:?}", msg.clone());
                 actor.update_subscribers(msg.clone()).await;
@@ -159,8 +175,19 @@ impl ConnectionHandle {
     }
 
     pub async fn send(&self, data: Bytes) -> Result<(), RecvError> {
+        log::debug!("Send {:?}", data);
         let (sender, receiver) = oneshot::channel();
         let msg = ConnectionMessage::Send {
+            data,
+            respond_to: sender,
+        };
+        let _ = self.sender.send(msg).await;
+        receiver.await
+    }
+
+    pub async fn send_clear_text(&self, data: Bytes) -> Result<(), RecvError> {
+        let (sender, receiver) = oneshot::channel();
+        let msg = ConnectionMessage::SendClearText {
             data,
             respond_to: sender,
         };

@@ -21,7 +21,7 @@ use tokio::sync::mpsc;
 use tokio_util::bytes::Bytes;
 
 use self::connection::ConnectionHandle;
-use self::protocol::Message;
+use self::protocol::{HandshakeMessage, Message};
 mod connection;
 mod noise_handler;
 mod protocol;
@@ -80,14 +80,15 @@ impl Node {
     /// Start accepting connections
     pub async fn start_accept(&mut self, listener: TcpListener) {
         log::debug!("Start accepting...");
+        let init = true;
         loop {
             log::debug!("Waiting on accept...");
             let (stream, socket_addr) = listener.accept().await.unwrap();
             log::info!("Accept connection from {}", socket_addr);
             let key = self.static_key_pem.clone();
             let (connection_handle, subscription_receiver) =
-                ConnectionHandle::start(stream, key, true).await;
-            self.start_connection(connection_handle, subscription_receiver)
+                ConnectionHandle::start(stream, key, init).await;
+            self.start_connection(connection_handle, subscription_receiver, init)
                 .await;
         }
     }
@@ -96,6 +97,7 @@ impl Node {
     pub async fn connect_to_seeds(&mut self) {
         log::debug!("Connecting to seeds...");
         let seeds = self.seeds.clone();
+        let init = false;
         for seed in seeds.iter() {
             log::debug!("Connecting to seed {}", seed);
             if let Ok(stream) = TcpStream::connect(seed).await {
@@ -103,8 +105,8 @@ impl Node {
                 log::info!("Connected to {}", peer_addr);
                 let key = self.static_key_pem.clone();
                 let (connection_handle, subscription_receiver) =
-                    ConnectionHandle::start(stream, key, false).await;
-                self.start_connection(connection_handle, subscription_receiver)
+                    ConnectionHandle::start(stream, key, init).await;
+                self.start_connection(connection_handle, subscription_receiver, init)
                     .await;
             } else {
                 log::debug!("Failed to connect to seed {}", seed);
@@ -116,6 +118,7 @@ impl Node {
         &mut self,
         connection_handle: ConnectionHandle,
         mut subscription_receiver: mpsc::Receiver<Bytes>,
+        init: bool,
     ) {
         let cloned = connection_handle.clone();
         tokio::spawn(async move {
@@ -131,6 +134,6 @@ impl Node {
             }
             log::debug!("Closing accepted connection");
         });
-        // protocol::start_protocol::<HandshakeMessage>(connection_handle, init).await;
+        protocol::start_protocol::<HandshakeMessage>(connection_handle, init).await;
     }
 }

@@ -43,7 +43,7 @@ impl ProtocolMessage for HandshakeMessage {
                 })))
             }
             HandshakeMessage { message, version } if message == "oleh" && version == "0.1.0" => {
-                Ok(PingMessage::start())
+                Ok(None)
             }
             _ => Err("Bad message".to_string()),
         }
