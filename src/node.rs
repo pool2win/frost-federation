@@ -24,8 +24,8 @@ use tokio_util::bytes::Bytes;
 
 use self::connection::ConnectionHandle;
 use self::noise_handler::NoiseHandler;
-use self::protocol::{HandshakeMessage, NoiseHandshakeMessage};
-use self::protocol::{Message, ProtocolMessage};
+use self::protocol::HandshakeMessage;
+use self::protocol::Message;
 mod connection;
 mod noise_handler;
 mod protocol;
@@ -116,29 +116,33 @@ impl Node {
         &mut self,
         connection_handle: ConnectionHandle,
         init: bool,
-        mut subscription_receiver: mpsc::Receiver<Bytes>,
+        subscription_receiver: mpsc::Receiver<Bytes>,
     ) {
         let key = self.static_key_pem.clone();
-        let cloned = connection_handle.clone();
         let mut noise = NoiseHandler::new(init, key);
 
-        let subscription_receiver = noise.run_handshake(cloned, subscription_receiver).await;
+        let mut subscription_receiver = noise
+            .run_handshake(connection_handle.clone(), subscription_receiver)
+            .await;
+        noise.start_transport();
+        log::debug!("Noise transport started");
 
-        // tokio::spawn(async move {
-        //     while let Some(result) = subscription_receiver.recv().await {
-        //         let result = noise.read_transport_message(result);
-        //         let received_message = Message::from_bytes(&result).unwrap();
-        //         log::debug!("Received {:?}", received_message);
-        //         if let Some(response) = received_message.response_for_received().unwrap() {
-        //             log::debug!("Sending Response {:?}", response);
-        //             if let Some(response_bytes) = response.as_bytes() {
-        //                 let response = noise.build_transport_message(&response_bytes);
-        //                 let _ = cloned.send(response).await;
-        //             }
-        //         }
-        //     }
-        //     log::debug!("Closing accepted connection");
-        // });
+        let cloned = connection_handle.clone();
+        tokio::spawn(async move {
+            while let Some(result) = subscription_receiver.recv().await {
+                let result = noise.read_transport_message(result);
+                let received_message = Message::from_bytes(&result).unwrap();
+                log::debug!("Received {:?}", received_message);
+                if let Some(response) = received_message.response_for_received().unwrap() {
+                    log::debug!("Sending Response {:?}", response);
+                    if let Some(response_bytes) = response.as_bytes() {
+                        let response = noise.build_transport_message(&response_bytes);
+                        let _ = cloned.send(response).await;
+                    }
+                }
+            }
+            log::debug!("Closing accepted connection");
+        });
         // protocol::start_protocol::<HandshakeMessage>(connection_handle, init).await;
     }
 }

@@ -72,7 +72,7 @@ impl NoiseHandler {
     }
 
     /// Switch to transport mode and drop the handshake state
-    pub async fn start_transport(mut self) {
+    pub fn start_transport(&mut self) {
         let state = self.handshake_state.take();
         self.transport_state = Some(state.unwrap().into_transport_mode().unwrap());
     }
@@ -108,6 +108,30 @@ impl NoiseHandler {
         let mut buf = [0u8; NOISE_MAX_MSG_LENGTH];
         let len = self
             .handshake_state
+            .as_mut()
+            .unwrap()
+            .read_message(&msg, &mut buf[..msg.len()])
+            .unwrap();
+        Bytes::from_iter(buf).slice(0..len)
+    }
+
+    /// Build a handshake message (using the handshake state)
+    pub fn build_transport_message(&mut self, message: &[u8]) -> Bytes {
+        let mut buf = [0u8; NOISE_MAX_MSG_LENGTH];
+        let len = self
+            .transport_state
+            .as_mut()
+            .unwrap()
+            .write_message(message, &mut buf)
+            .unwrap();
+        Bytes::from_iter(buf).slice(0..len)
+    }
+
+    /// Read handshake message (using the handshake state)
+    pub fn read_transport_message(&mut self, msg: Bytes) -> Bytes {
+        let mut buf = [0u8; NOISE_MAX_MSG_LENGTH];
+        let len = self
+            .transport_state
             .as_mut()
             .unwrap()
             .read_message(&msg, &mut buf[..msg.len()])
