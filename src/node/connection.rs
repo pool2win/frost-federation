@@ -17,7 +17,6 @@
 // <https://www.gnu.org/licenses/>.
 
 use tokio::sync::oneshot::error::RecvError;
-
 use tokio::{
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
@@ -29,9 +28,10 @@ use tokio_util::{
     bytes::Bytes,
     codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
 };
-
 // Bring StreamExt in scope for access to `next` calls
 use tokio_stream::StreamExt;
+
+use super::noise_handler::NoiseHandler;
 
 #[derive(Debug)]
 pub enum ConnectionMessage {
@@ -50,14 +50,17 @@ pub struct ConnectionActor {
     writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
     receiver: mpsc::Receiver<ConnectionMessage>,
     subscribers: Vec<mpsc::Sender<Bytes>>,
+    noise: NoiseHandler,
 }
 
 impl ConnectionActor {
     /// Build a new connection struct to work with the TcpStream
-    pub fn new(
+    pub async fn start(
         stream: TcpStream,
         receiver: mpsc::Receiver<ConnectionMessage>,
         subscription_sender: mpsc::Sender<Bytes>,
+        key: String,
+        init: bool,
     ) -> Self {
         // Set up a length delimted codec for Noise
         let (r, w) = stream.into_split();
@@ -72,11 +75,18 @@ impl ConnectionActor {
             .length_adjustment(0)
             .new_write(w);
 
+        let mut noise = NoiseHandler::new(init, key);
+        let (framed_reader, framed_writer) =
+            noise.run_handshake(framed_reader, framed_writer).await;
+        noise.start_transport();
+        log::debug!("Noise transport started");
+
         ConnectionActor {
             reader: framed_reader,
             writer: framed_writer,
             receiver,
             subscribers: vec![subscription_sender],
+            noise,
         }
     }
 
@@ -133,11 +143,16 @@ pub struct ConnectionHandle {
 }
 
 impl ConnectionHandle {
-    pub fn start(tcp_stream: TcpStream) -> (Self, mpsc::Receiver<Bytes>) {
+    pub async fn start(
+        tcp_stream: TcpStream,
+        key: String,
+        init: bool,
+    ) -> (Self, mpsc::Receiver<Bytes>) {
         let (sender, receiver) = mpsc::channel(32);
         let (subscription_sender, subscription_receiver) = mpsc::channel(32);
 
-        let connection_actor = ConnectionActor::new(tcp_stream, receiver, subscription_sender);
+        let connection_actor =
+            ConnectionActor::start(tcp_stream, receiver, subscription_sender, key, init).await;
         tokio::spawn(run_connection_actor(connection_actor));
 
         (Self { sender }, subscription_receiver)

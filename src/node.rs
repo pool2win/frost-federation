@@ -16,15 +16,11 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use std::result;
-
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_util::bytes::Bytes;
 
 use self::connection::ConnectionHandle;
-use self::noise_handler::NoiseHandler;
-use self::protocol::HandshakeMessage;
 use self::protocol::Message;
 mod connection;
 mod noise_handler;
@@ -88,8 +84,10 @@ impl Node {
             log::debug!("Waiting on accept...");
             let (stream, socket_addr) = listener.accept().await.unwrap();
             log::info!("Accept connection from {}", socket_addr);
-            let (connection_handle, subscription_receiver) = ConnectionHandle::start(stream);
-            self.start_connection(connection_handle, true, subscription_receiver)
+            let key = self.static_key_pem.clone();
+            let (connection_handle, subscription_receiver) =
+                ConnectionHandle::start(stream, key, true).await;
+            self.start_connection(connection_handle, subscription_receiver)
                 .await;
         }
     }
@@ -103,8 +101,10 @@ impl Node {
             if let Ok(stream) = TcpStream::connect(seed).await {
                 let peer_addr = stream.peer_addr().unwrap();
                 log::info!("Connected to {}", peer_addr);
-                let (connection_handle, subscription_receiver) = ConnectionHandle::start(stream);
-                self.start_connection(connection_handle, false, subscription_receiver)
+                let key = self.static_key_pem.clone();
+                let (connection_handle, subscription_receiver) =
+                    ConnectionHandle::start(stream, key, false).await;
+                self.start_connection(connection_handle, subscription_receiver)
                     .await;
             } else {
                 log::debug!("Failed to connect to seed {}", seed);
@@ -115,29 +115,17 @@ impl Node {
     pub async fn start_connection(
         &mut self,
         connection_handle: ConnectionHandle,
-        init: bool,
-        subscription_receiver: mpsc::Receiver<Bytes>,
+        mut subscription_receiver: mpsc::Receiver<Bytes>,
     ) {
-        let key = self.static_key_pem.clone();
-        let mut noise = NoiseHandler::new(init, key);
-
-        let mut subscription_receiver = noise
-            .run_handshake(connection_handle.clone(), subscription_receiver)
-            .await;
-        noise.start_transport();
-        log::debug!("Noise transport started");
-
         let cloned = connection_handle.clone();
         tokio::spawn(async move {
             while let Some(result) = subscription_receiver.recv().await {
-                let result = noise.read_transport_message(result);
                 let received_message = Message::from_bytes(&result).unwrap();
                 log::debug!("Received {:?}", received_message);
                 if let Some(response) = received_message.response_for_received().unwrap() {
                     log::debug!("Sending Response {:?}", response);
                     if let Some(response_bytes) = response.as_bytes() {
-                        let response = noise.build_transport_message(&response_bytes);
-                        let _ = cloned.send(response).await;
+                        let _ = cloned.send(response_bytes).await;
                     }
                 }
             }

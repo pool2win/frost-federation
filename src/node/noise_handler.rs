@@ -18,11 +18,13 @@
 
 use ed25519_dalek::pkcs8::DecodePrivateKey;
 use ed25519_dalek::{SigningKey, SECRET_KEY_LENGTH};
+use futures::{SinkExt, StreamExt};
 use snow::{HandshakeState, Keypair, TransportState};
-use tokio::sync::mpsc;
-use tokio_util::bytes::Bytes;
-
-use super::connection::ConnectionHandle;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio_util::{
+    bytes::Bytes,
+    codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
+};
 
 // TODO[pool2win]: Change this to XK once we have setup pubkey as node id
 //
@@ -38,6 +40,7 @@ const NOISE_MAX_MSG_LENGTH: usize = 65535;
 /// Noise handler reads and writes messages according to the noise
 /// protocol used. The handler provides confidential and authenticated
 /// channels between two peers.
+#[derive(Debug)]
 pub struct NoiseHandler {
     handshake_state: Option<HandshakeState>,
     transport_state: Option<TransportState>,
@@ -81,13 +84,16 @@ impl NoiseHandler {
     /// the case may be
     pub async fn run_handshake(
         &mut self,
-        connection_handle: ConnectionHandle,
-        receiver: mpsc::Receiver<Bytes>,
-    ) -> mpsc::Receiver<Bytes> {
+        reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
+        writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
+    ) -> (
+        FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
+        FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
+    ) {
         if self.initiator {
-            self.initiator_handshake(connection_handle, receiver).await
+            self.initiator_handshake(reader, writer).await
         } else {
-            self.responder_handshake(connection_handle, receiver).await
+            self.responder_handshake(reader, writer).await
         }
     }
 
@@ -143,37 +149,51 @@ impl NoiseHandler {
     /// Noise protocol being used
     async fn initiator_handshake(
         &mut self,
-        connection_handle: ConnectionHandle,
-        mut receiver: mpsc::Receiver<Bytes>,
-    ) -> mpsc::Receiver<Bytes> {
+        mut reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
+        mut writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
+    ) -> (
+        FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
+        FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
+    ) {
         let m1 = self.build_handshake_message(b"-> e");
-        let _ = connection_handle.send(m1).await;
+        log::debug!("m1 : {:?}", m1.clone());
+        let _ = writer.send(m1).await;
 
-        let m2 = receiver.recv().await.unwrap();
+        let m2 = reader.next().await.unwrap().unwrap().freeze();
+        log::debug!("m2 : {:?}", m2.clone());
         let _ = self.read_handshake_message(m2);
 
         let m3 = self.build_handshake_message(b"-> s, se");
-        let _ = connection_handle.send(m3).await;
+        log::debug!("m3 : {:?}", m3.clone());
+        let _ = writer.send(m3).await;
+
         log::info!("Noise channel ready");
-        receiver
+        (reader, writer)
     }
 
     /// Run initiator handshake steps. The steps here depend on the
     /// Noise protocol being used
     async fn responder_handshake(
         &mut self,
-        connection_handle: ConnectionHandle,
-        mut receiver: mpsc::Receiver<Bytes>,
-    ) -> mpsc::Receiver<Bytes> {
-        let m1 = receiver.recv().await.unwrap();
+        mut reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
+        mut writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
+    ) -> (
+        FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
+        FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
+    ) {
+        let m1 = reader.next().await.unwrap().unwrap().freeze();
+        log::debug!("m1 : {:?}", m1.clone());
         let _ = self.read_handshake_message(m1);
 
         let m2 = self.build_handshake_message(b"<- e, ee, s, es");
-        let _ = connection_handle.send(m2).await;
+        log::debug!("m2 : {:?}", m2.clone());
+        let _ = writer.send(m2).await;
 
-        let m3 = receiver.recv().await.unwrap();
+        let m3 = reader.next().await.unwrap().unwrap().freeze();
+        log::debug!("m3 : {:?}", m3.clone());
         let _ = self.read_handshake_message(m3);
+
         log::info!("Noise channel ready");
-        receiver
+        (reader, writer)
     }
 }
