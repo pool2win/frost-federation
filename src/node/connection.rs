@@ -37,6 +37,10 @@ use super::noise_handler::NoiseHandler;
 
 #[derive(Debug)]
 pub enum ConnectionMessage {
+    ReliableSend {
+        data: Bytes,
+        respond_to: oneshot::Sender<()>,
+    },
     Send {
         data: Bytes,
         respond_to: oneshot::Sender<()>,
@@ -68,7 +72,7 @@ impl ConnectionActor {
         key: String,
         init: bool,
     ) -> Self {
-        // Set up a length delimted codec for Noise
+        // Set up a length delimted codec
         let (r, w) = stream.into_split();
         let framed_reader = LengthDelimitedCodec::builder()
             .length_field_offset(0)
@@ -96,32 +100,77 @@ impl ConnectionActor {
         }
     }
 
-    pub async fn handle_message(&mut self, msg: ConnectionMessage) {
+    pub async fn handle_message(
+        &mut self,
+        msg: ConnectionMessage,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         match msg {
+            ConnectionMessage::ReliableSend { data, respond_to } => {
+                self.handle_reliable_send(data, respond_to).await
+            }
             ConnectionMessage::Send { data, respond_to } => {
                 self.handle_send(data, respond_to).await
             }
             ConnectionMessage::SendClearText { data, respond_to } => {
                 self.handle_send_clear_text(data, respond_to).await
             }
-            ConnectionMessage::Subscribe { respond_to } => self.handle_subscribe(respond_to).await,
+            ConnectionMessage::Subscribe { respond_to } => {
+                self.handle_subscribe(respond_to).await;
+                Ok(())
+            }
         }
     }
 
-    pub async fn handle_send(&mut self, data: Bytes, respond_to: oneshot::Sender<()>) {
+    pub async fn handle_send(
+        &mut self,
+        data: Bytes,
+        respond_to: oneshot::Sender<()>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         log::debug!("handle_send {:?}", data);
         let data = self.noise.build_transport_message(&data);
-        if self.writer.send(data).await.is_err() {
-            log::info!("Closing connection");
-            let _ = self.writer.close().await;
-            let _ = respond_to.send(());
+        match self.writer.send(data).await {
+            Err(_) => {
+                log::info!("Closing connection");
+                let _ = self.writer.close().await;
+                Err("Error writing to socket stream".into())
+            }
+            Ok(_) => {
+                let _ = respond_to.send(());
+                Ok(())
+            }
         }
     }
 
-    pub async fn handle_send_clear_text(&mut self, data: Bytes, respond_to: oneshot::Sender<()>) {
-        if self.writer.send(data).await.is_err() {
-            log::info!("Closing connection");
-            let _ = respond_to.send(());
+    pub async fn handle_reliable_send(
+        &mut self,
+        data: Bytes,
+        respond_to: oneshot::Sender<()>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        log::debug!("handle_send {:?}", data);
+        let data = self.noise.build_transport_message(&data);
+        match self.writer.send(data).await {
+            Err(_) => {
+                let _ = self.writer.close().await;
+                Err("Error writing to socket stream".into())
+            }
+            Ok(_) => {
+                let _ = respond_to.send(());
+                Ok(())
+            }
+        }
+    }
+
+    pub async fn handle_send_clear_text(
+        &mut self,
+        data: Bytes,
+        respond_to: oneshot::Sender<()>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match self.writer.send(data).await {
+            Err(_) => Err("Error writing to socket stream".into()),
+            Ok(_) => {
+                let _ = respond_to.send(());
+                Ok(())
+            }
         }
     }
 
@@ -142,7 +191,10 @@ pub async fn run_connection_actor(mut actor: ConnectionActor) {
     loop {
         tokio::select! {
             Some(message) = actor.receiver.recv() => { // read next command from handle
-                actor.handle_message(message).await;
+                if actor.handle_message(message).await.is_err() {
+                    log::info!("Connection actor reader closed");
+                    return;
+                }
             }
             message = actor.reader.next() => { // read next message from network
                 match message {
