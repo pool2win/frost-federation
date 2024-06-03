@@ -35,19 +35,23 @@ use futures::sink::SinkExt;
 
 use super::noise_handler::NoiseHandler;
 
+type ConnectionError = Box<dyn std::error::Error + Send + Sync + 'static>;
+type ConnectionResult<T> = std::result::Result<T, ConnectionError>;
+type ConnectionResultSender = oneshot::Sender<ConnectionResult<()>>;
+
 #[derive(Debug)]
 pub enum ConnectionMessage {
     ReliableSend {
         data: Bytes,
-        respond_to: oneshot::Sender<()>,
+        respond_to: ConnectionResultSender,
     },
     Send {
         data: Bytes,
-        respond_to: oneshot::Sender<()>,
+        respond_to: ConnectionResultSender,
     },
     SendClearText {
         data: Bytes,
-        respond_to: oneshot::Sender<()>,
+        respond_to: ConnectionResultSender,
     },
     Subscribe {
         respond_to: mpsc::Sender<Bytes>,
@@ -124,7 +128,7 @@ impl ConnectionActor {
     pub async fn handle_send(
         &mut self,
         data: Bytes,
-        respond_to: oneshot::Sender<()>,
+        respond_to: ConnectionResultSender,
     ) -> Result<(), Box<dyn std::error::Error>> {
         log::debug!("handle_send {:?}", data);
         let data = self.noise.build_transport_message(&data);
@@ -135,7 +139,7 @@ impl ConnectionActor {
                 Err("Error writing to socket stream".into())
             }
             Ok(_) => {
-                let _ = respond_to.send(());
+                let _ = respond_to.send(Ok(()));
                 Ok(())
             }
         }
@@ -144,7 +148,7 @@ impl ConnectionActor {
     pub async fn handle_reliable_send(
         &mut self,
         data: Bytes,
-        respond_to: oneshot::Sender<()>,
+        respond_to: ConnectionResultSender,
     ) -> Result<(), Box<dyn std::error::Error>> {
         log::debug!("handle_send {:?}", data);
         let data = self.noise.build_transport_message(&data);
@@ -154,7 +158,7 @@ impl ConnectionActor {
                 Err("Error writing to socket stream".into())
             }
             Ok(_) => {
-                let _ = respond_to.send(());
+                let _ = respond_to.send(Ok(()));
                 Ok(())
             }
         }
@@ -163,12 +167,12 @@ impl ConnectionActor {
     pub async fn handle_send_clear_text(
         &mut self,
         data: Bytes,
-        respond_to: oneshot::Sender<()>,
+        respond_to: ConnectionResultSender,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match self.writer.send(data).await {
             Err(_) => Err("Error writing to socket stream".into()),
             Ok(_) => {
-                let _ = respond_to.send(());
+                let _ = respond_to.send(Ok(()));
                 Ok(())
             }
         }
@@ -238,7 +242,7 @@ impl ConnectionHandle {
         (Self { sender }, subscription_receiver)
     }
 
-    pub async fn send(&self, data: Bytes) -> Result<(), RecvError> {
+    pub async fn send(&self, data: Bytes) -> ConnectionResult<()> {
         log::debug!("Send {:?}", data);
         let (sender, receiver) = oneshot::channel();
         let msg = ConnectionMessage::Send {
@@ -246,17 +250,17 @@ impl ConnectionHandle {
             respond_to: sender,
         };
         let _ = self.sender.send(msg).await;
-        receiver.await
+        receiver.await?
     }
 
-    pub async fn send_clear_text(&self, data: Bytes) -> Result<(), RecvError> {
+    pub async fn send_clear_text(&self, data: Bytes) -> ConnectionResult<()> {
         let (sender, receiver) = oneshot::channel();
         let msg = ConnectionMessage::SendClearText {
             data,
             respond_to: sender,
         };
         let _ = self.sender.send(msg).await;
-        receiver.await
+        receiver.await?
     }
 
     pub async fn add_subscription(&self) -> mpsc::Receiver<Bytes> {
