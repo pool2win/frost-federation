@@ -132,7 +132,7 @@ impl Node {
                     }
                 }
             }
-            log::debug!("Closing accepted connection");
+            log::debug!("Closing connection");
         });
         protocol::start_protocol::<HandshakeMessage>(connection_handle, init).await;
     }

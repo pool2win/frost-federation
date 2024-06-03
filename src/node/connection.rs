@@ -113,6 +113,7 @@ impl ConnectionActor {
         let data = self.noise.build_transport_message(&data);
         if self.writer.send(data).await.is_err() {
             log::info!("Closing connection");
+            let _ = self.writer.close().await;
             let _ = respond_to.send(());
         }
     }
@@ -143,12 +144,23 @@ pub async fn run_connection_actor(mut actor: ConnectionActor) {
             Some(message) = actor.receiver.recv() => { // read next command from handle
                 actor.handle_message(message).await;
             }
-            Some(message) = actor.reader.next() => { // read next message from network
-                let msg = message.unwrap().freeze();
-                log::debug!("Received from network {:?}", msg.clone());
-                actor.update_subscribers(msg.clone()).await;
+            message = actor.reader.next() => { // read next message from network
+                match message {
+                    Some(message) => {
+                        let msg = message.unwrap().freeze();
+                        log::debug!("Received from network {:?}", msg.clone());
+                        actor.update_subscribers(msg.clone()).await;
+                    },
+                    None => { // Stream closed, return to clear up connection
+                        log::debug!("Connection actor reader closed");
+                        return;
+                    }
+                }
             }
-            else => ()
+            else => {
+                log::debug!("Connection actor stopping");
+                return;
+            }
         }
     }
 }
