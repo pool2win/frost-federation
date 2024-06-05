@@ -16,13 +16,18 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use tokio::sync::oneshot::error::RecvError;
+use std::{
+    collections::BTreeMap,
+    hash::{DefaultHasher, Hash, Hasher},
+    time::Duration,
+};
 use tokio::{
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
     },
     sync::{mpsc, oneshot},
+    time,
 };
 use tokio_util::{
     bytes::Bytes,
@@ -32,12 +37,18 @@ use tokio_util::{
 use tokio_stream::StreamExt;
 // Bring SinkExt in scope for access to `send` calls
 use futures::sink::SinkExt;
+use serde::{Deserialize, Serialize};
 
 use super::noise_handler::NoiseHandler;
 
 type ConnectionError = Box<dyn std::error::Error + Send + Sync + 'static>;
 type ConnectionResult<T> = std::result::Result<T, ConnectionError>;
 type ConnectionResultSender = oneshot::Sender<ConnectionResult<()>>;
+type MessageID = u64;
+
+#[derive(Debug)]
+struct MessageAndSender(Bytes, ConnectionResultSender);
+type WaitingForAck = BTreeMap<MessageID, MessageAndSender>;
 
 #[derive(Debug)]
 pub enum ConnectionMessage {
@@ -65,6 +76,13 @@ pub struct ConnectionActor {
     receiver: mpsc::Receiver<ConnectionMessage>,
     subscribers: Vec<mpsc::Sender<Bytes>>,
     noise: NoiseHandler,
+    waiting_for_ack: WaitingForAck,
+}
+
+fn get_hash(data: &[u8]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    data.hash(&mut hasher);
+    hasher.finish()
 }
 
 impl ConnectionActor {
@@ -101,6 +119,7 @@ impl ConnectionActor {
             receiver,
             subscribers: vec![subscription_sender],
             noise,
+            waiting_for_ack: BTreeMap::new(),
         }
     }
 
@@ -147,19 +166,33 @@ impl ConnectionActor {
 
     pub async fn handle_reliable_send(
         &mut self,
-        data: Bytes,
+        msg: Bytes,
         respond_to: ConnectionResultSender,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        log::debug!("handle_send {:?}", data);
-        let data = self.noise.build_transport_message(&data);
-        match self.writer.send(data).await {
+        log::debug!("handle_send {:?}", &msg);
+        let data = self.noise.build_transport_message(&msg);
+        match self.writer.send(data.clone()).await {
             Err(_) => {
                 let _ = self.writer.close().await;
                 Err("Error writing to socket stream".into())
             }
             Ok(_) => {
-                let _ = respond_to.send(Ok(()));
-                Ok(())
+                let message_id = get_hash(&data);
+                self.waiting_for_ack
+                    .insert(message_id, MessageAndSender(data.clone(), respond_to));
+                // let _ = respond_to.send(Ok(()));
+                let mut interval = time::interval(Duration::from_millis(10_000));
+                loop {
+                    interval.tick().await;
+                    if self.waiting_for_ack.contains_key(&message_id) {
+                        log::debug!("Resending {}", &message_id);
+                        // We need to noise encrypt the message every time.
+                        let data = self.noise.build_transport_message(&msg);
+                        self.writer.send(data).await?;
+                    } else {
+                        return Ok(());
+                    }
+                }
             }
         }
     }
@@ -246,6 +279,17 @@ impl ConnectionHandle {
         log::debug!("Send {:?}", data);
         let (sender, receiver) = oneshot::channel();
         let msg = ConnectionMessage::Send {
+            data,
+            respond_to: sender,
+        };
+        let _ = self.sender.send(msg).await;
+        receiver.await?
+    }
+
+    pub async fn reliable_send(&self, data: Bytes) -> ConnectionResult<()> {
+        log::debug!("Reliable Send {:?}", data);
+        let (sender, receiver) = oneshot::channel();
+        let msg = ConnectionMessage::ReliableSend {
             data,
             respond_to: sender,
         };

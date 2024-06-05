@@ -21,7 +21,6 @@ use tokio_util::bytes::Bytes;
 extern crate flexbuffers;
 extern crate serde;
 // #[macro_use]
-// extern crate serde_derive;
 use serde::{Deserialize, Serialize};
 
 mod handshake;

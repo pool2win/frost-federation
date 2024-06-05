@@ -128,7 +128,7 @@ impl Node {
                 if let Some(response) = received_message.response_for_received().unwrap() {
                     log::debug!("Sending Response {:?}", response);
                     if let Some(response_bytes) = response.as_bytes() {
-                        let _ = cloned.send(response_bytes).await;
+                        let _ = cloned.reliable_send(response_bytes).await;
                     }
                 }
             }
