@@ -20,7 +20,6 @@ use std::error::Error;
 use tokio_util::bytes::Bytes;
 extern crate flexbuffers;
 extern crate serde;
-// #[macro_use]
 use serde::{Deserialize, Serialize};
 
 mod handshake;
@@ -33,9 +32,9 @@ pub use heartbeat::HeartbeatMessage;
 pub use noise_handshake::NoiseHandshakeMessage;
 pub use ping::PingMessage;
 
-use super::connection::ConnectionHandle;
+use super::reliable_sender::ReliableSenderHandle;
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum Message {
     Handshake(HandshakeMessage),
     Heartbeat(HeartbeatMessage),
@@ -68,13 +67,16 @@ impl Message {
     }
 }
 
-pub async fn start_protocol<M>(handle: ConnectionHandle, init: bool)
+pub async fn start_protocol<M>(handle: ReliableSenderHandle, init: bool)
 where
     M: ProtocolMessage,
 {
     if init {
         if let Some(message) = M::start() {
-            let _ = handle.send(message.as_bytes().unwrap()).await;
+            log::debug!("Sending initial handshake message");
+            if let Err(e) = handle.send(message).await {
+                log::info!("Error sending start protocol message {}", e);
+            }
         }
     }
 }

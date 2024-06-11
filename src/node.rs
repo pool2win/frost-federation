@@ -16,15 +16,12 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
+use self::protocol::HandshakeMessage;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
-use tokio_util::bytes::Bytes;
-
-use self::connection::ConnectionHandle;
-use self::protocol::{HandshakeMessage, Message};
 mod connection;
 mod noise_handler;
 mod protocol;
+mod reliable_sender;
 
 #[derive(Debug)]
 pub struct Node {
@@ -85,11 +82,7 @@ impl Node {
             log::debug!("Waiting on accept...");
             let (stream, socket_addr) = listener.accept().await.unwrap();
             log::info!("Accept connection from {}", socket_addr);
-            let key = self.static_key_pem.clone();
-            let (connection_handle, subscription_receiver) =
-                ConnectionHandle::start(stream, key, init).await;
-            self.start_connection(connection_handle, subscription_receiver, init)
-                .await;
+            self.start_reliable_sender_receiver(stream, init).await;
         }
     }
 
@@ -103,37 +96,37 @@ impl Node {
             if let Ok(stream) = TcpStream::connect(seed).await {
                 let peer_addr = stream.peer_addr().unwrap();
                 log::info!("Connected to {}", peer_addr);
-                let key = self.static_key_pem.clone();
-                let (connection_handle, subscription_receiver) =
-                    ConnectionHandle::start(stream, key, init).await;
-                self.start_connection(connection_handle, subscription_receiver, init)
-                    .await;
+                self.start_reliable_sender_receiver(stream, init).await;
             } else {
                 log::debug!("Failed to connect to seed {}", seed);
             }
         }
     }
 
-    pub async fn start_connection(
-        &mut self,
-        connection_handle: ConnectionHandle,
-        mut subscription_receiver: mpsc::Receiver<Bytes>,
-        init: bool,
-    ) {
-        let cloned = connection_handle.clone();
+    pub async fn start_reliable_sender_receiver(&mut self, stream: TcpStream, init: bool) {
+        let (reliable_sender_handle, mut application_receiver) =
+            reliable_sender::ReliableSenderHandle::start(stream, self.static_key_pem.clone(), init)
+                .await;
+        let cloned = reliable_sender_handle.clone();
         tokio::spawn(async move {
-            while let Some(result) = subscription_receiver.recv().await {
-                let received_message = Message::from_bytes(&result).unwrap();
-                log::debug!("Received {:?}", received_message);
-                if let Some(response) = received_message.response_for_received().unwrap() {
-                    log::debug!("Sending Response {:?}", response);
-                    if let Some(response_bytes) = response.as_bytes() {
-                        let _ = cloned.reliable_send(response_bytes).await;
+            while let Some(message) = application_receiver.recv().await {
+                log::debug!("Application message received {:?}", message);
+                match message.response_for_received() {
+                    Ok(Some(response)) => {
+                        log::debug!("Sending Response {:?}", response);
+                        let _ = cloned.send(response).await;
+                    }
+                    Ok(None) => {
+                        log::info!("No response to send ")
+                    }
+                    Err(e) => {
+                        log::info!("Error generating response {}", e)
                     }
                 }
             }
-            log::debug!("Closing connection");
+            log::debug!("Connection clean up");
         });
-        protocol::start_protocol::<HandshakeMessage>(connection_handle, init).await;
+        // Start the first protocol to start interaction between nodes
+        protocol::start_protocol::<HandshakeMessage>(reliable_sender_handle, init).await;
     }
 }

@@ -16,56 +16,34 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use std::{
-    collections::BTreeMap,
-    hash::{DefaultHasher, Hash, Hasher},
-    time::Duration,
-};
+use super::{noise_handler::NoiseHandler, reliable_sender::ReliableNetworkMessage};
+use futures::sink::SinkExt; // Bring SinkExt in scope for access to `send` calls
 use tokio::{
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
     },
     sync::{mpsc, oneshot},
-    time,
 };
+use tokio_stream::StreamExt; // Bring StreamExt in scope for access to `next` calls
 use tokio_util::{
     bytes::Bytes,
     codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
 };
-// Bring StreamExt in scope for access to `next` calls
-use tokio_stream::StreamExt;
-// Bring SinkExt in scope for access to `send` calls
-use futures::sink::SinkExt;
-use serde::{Deserialize, Serialize};
-
-use super::noise_handler::NoiseHandler;
 
 type ConnectionError = Box<dyn std::error::Error + Send + Sync + 'static>;
-type ConnectionResult<T> = std::result::Result<T, ConnectionError>;
-type ConnectionResultSender = oneshot::Sender<ConnectionResult<()>>;
-type MessageID = u64;
-
-#[derive(Debug)]
-struct MessageAndSender(Bytes, ConnectionResultSender);
-type WaitingForAck = BTreeMap<MessageID, MessageAndSender>;
+pub(crate) type ConnectionResult<T> = std::result::Result<T, ConnectionError>;
+pub(crate) type ConnectionResultSender = oneshot::Sender<ConnectionResult<()>>;
 
 #[derive(Debug)]
 pub enum ConnectionMessage {
-    ReliableSend {
-        data: Bytes,
-        respond_to: ConnectionResultSender,
-    },
     Send {
-        data: Bytes,
+        data: ReliableNetworkMessage,
         respond_to: ConnectionResultSender,
     },
     SendClearText {
-        data: Bytes,
+        data: ReliableNetworkMessage,
         respond_to: ConnectionResultSender,
-    },
-    Subscribe {
-        respond_to: mpsc::Sender<Bytes>,
     },
 }
 
@@ -74,15 +52,8 @@ pub struct ConnectionActor {
     reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
     writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
     receiver: mpsc::Receiver<ConnectionMessage>,
-    subscribers: Vec<mpsc::Sender<Bytes>>,
+    subscriber: mpsc::Sender<ReliableNetworkMessage>,
     noise: NoiseHandler,
-    waiting_for_ack: WaitingForAck,
-}
-
-fn get_hash(data: &[u8]) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    data.hash(&mut hasher);
-    hasher.finish()
 }
 
 impl ConnectionActor {
@@ -90,7 +61,7 @@ impl ConnectionActor {
     pub async fn start(
         stream: TcpStream,
         receiver: mpsc::Receiver<ConnectionMessage>,
-        subscription_sender: mpsc::Sender<Bytes>,
+        subscription_sender: mpsc::Sender<ReliableNetworkMessage>,
         key: String,
         init: bool,
     ) -> Self {
@@ -117,9 +88,8 @@ impl ConnectionActor {
             reader: framed_reader,
             writer: framed_writer,
             receiver,
-            subscribers: vec![subscription_sender],
+            subscriber: subscription_sender,
             noise,
-            waiting_for_ack: BTreeMap::new(),
         }
     }
 
@@ -128,99 +98,67 @@ impl ConnectionActor {
         msg: ConnectionMessage,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match msg {
-            ConnectionMessage::ReliableSend { data, respond_to } => {
-                self.handle_reliable_send(data, respond_to).await
-            }
             ConnectionMessage::Send { data, respond_to } => {
                 self.handle_send(data, respond_to).await
             }
             ConnectionMessage::SendClearText { data, respond_to } => {
                 self.handle_send_clear_text(data, respond_to).await
             }
-            ConnectionMessage::Subscribe { respond_to } => {
-                self.handle_subscribe(respond_to).await;
-                Ok(())
-            }
         }
     }
 
     pub async fn handle_send(
         &mut self,
-        data: Bytes,
+        msg: ReliableNetworkMessage,
         respond_to: ConnectionResultSender,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        log::debug!("handle_send {:?}", data);
-        let data = self.noise.build_transport_message(&data);
-        match self.writer.send(data).await {
-            Err(_) => {
-                log::info!("Closing connection");
-                let _ = self.writer.close().await;
-                Err("Error writing to socket stream".into())
-            }
-            Ok(_) => {
-                let _ = respond_to.send(Ok(()));
-                Ok(())
-            }
-        }
-    }
-
-    pub async fn handle_reliable_send(
-        &mut self,
-        msg: Bytes,
-        respond_to: ConnectionResultSender,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        log::debug!("handle_send {:?}", &msg);
-        let data = self.noise.build_transport_message(&msg);
-        match self.writer.send(data.clone()).await {
-            Err(_) => {
-                let _ = self.writer.close().await;
-                Err("Error writing to socket stream".into())
-            }
-            Ok(_) => {
-                let message_id = get_hash(&data);
-                self.waiting_for_ack
-                    .insert(message_id, MessageAndSender(data.clone(), respond_to));
-                // let _ = respond_to.send(Ok(()));
-                let mut interval = time::interval(Duration::from_millis(10_000));
-                loop {
-                    interval.tick().await;
-                    if self.waiting_for_ack.contains_key(&message_id) {
-                        log::debug!("Resending {}", &message_id);
-                        // We need to noise encrypt the message every time.
-                        let data = self.noise.build_transport_message(&msg);
-                        self.writer.send(data).await?;
-                    } else {
-                        return Ok(());
+        log::debug!("handle_send {:?}", msg);
+        match msg.as_bytes() {
+            Some(network_message) => {
+                let data = self.noise.build_transport_message(&network_message);
+                match self.writer.send(data).await {
+                    Err(_) => {
+                        log::info!("Closing connection");
+                        let _ = self.writer.close().await;
+                        Err("Error writing to socket stream".into())
+                    }
+                    Ok(_) => {
+                        let _ = respond_to.send(Ok(()));
+                        Ok(())
                     }
                 }
             }
+            None => Err("Error serializing message".into()),
         }
     }
 
     pub async fn handle_send_clear_text(
         &mut self,
-        data: Bytes,
+        msg: ReliableNetworkMessage,
         respond_to: ConnectionResultSender,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        match self.writer.send(data).await {
-            Err(_) => Err("Error writing to socket stream".into()),
-            Ok(_) => {
-                let _ = respond_to.send(Ok(()));
-                Ok(())
+        if let Some(data) = msg.as_bytes() {
+            self.writer.send(data).await?;
+            match respond_to.send(Ok(())) {
+                Ok(_) => Ok(()),
+                Err(_) => {
+                    Err("Unable to write to client sending clear text. Client went away?".into())
+                }
             }
+        } else {
+            Err("Error serializing message".into())
         }
     }
 
-    pub async fn handle_subscribe(&mut self, respond_to: mpsc::Sender<Bytes>) {
-        self.subscribers.push(respond_to);
-    }
-
-    pub async fn update_subscribers(&mut self, message: Bytes) {
-        log::debug!("Updating subscribers... {}", self.subscribers.len());
+    pub async fn handle_received(
+        &mut self,
+        message: Bytes,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let decrypted_message = self.noise.read_transport_message(message);
-        for subscriber in &self.subscribers {
-            let _ = subscriber.send(decrypted_message.clone()).await;
-        }
+        let network_message = ReliableNetworkMessage::from_bytes(&decrypted_message)?;
+        log::debug!("Received message {:?}", network_message);
+        self.subscriber.send(network_message).await?;
+        Ok(())
     }
 }
 
@@ -228,6 +166,7 @@ pub async fn run_connection_actor(mut actor: ConnectionActor) {
     loop {
         tokio::select! {
             Some(message) = actor.receiver.recv() => { // read next command from handle
+                // TODO: Enable concurrent processing of messages received on a connection. Currently we handle one message at a time.
                 if actor.handle_message(message).await.is_err() {
                     log::info!("Connection actor reader closed");
                     return;
@@ -236,9 +175,13 @@ pub async fn run_connection_actor(mut actor: ConnectionActor) {
             message = actor.reader.next() => { // read next message from network
                 match message {
                     Some(message) => {
+                        if message.is_err() {
+                            log::info!("Connection closed by peer");
+                            return
+                        }
                         let msg = message.unwrap().freeze();
                         log::debug!("Received from network {:?}", msg.clone());
-                        actor.update_subscribers(msg.clone()).await;
+                        actor.handle_received(msg.clone()).await.unwrap();
                     },
                     None => { // Stream closed, return to clear up connection
                         log::debug!("Connection actor reader closed");
@@ -264,7 +207,7 @@ impl ConnectionHandle {
         tcp_stream: TcpStream,
         key: String,
         init: bool,
-    ) -> (Self, mpsc::Receiver<Bytes>) {
+    ) -> (Self, mpsc::Receiver<ReliableNetworkMessage>) {
         let (sender, receiver) = mpsc::channel(32);
         let (subscription_sender, subscription_receiver) = mpsc::channel(32);
 
@@ -275,7 +218,7 @@ impl ConnectionHandle {
         (Self { sender }, subscription_receiver)
     }
 
-    pub async fn send(&self, data: Bytes) -> ConnectionResult<()> {
+    pub async fn send(&self, data: ReliableNetworkMessage) -> ConnectionResult<()> {
         log::debug!("Send {:?}", data);
         let (sender, receiver) = oneshot::channel();
         let msg = ConnectionMessage::Send {
@@ -286,18 +229,7 @@ impl ConnectionHandle {
         receiver.await?
     }
 
-    pub async fn reliable_send(&self, data: Bytes) -> ConnectionResult<()> {
-        log::debug!("Reliable Send {:?}", data);
-        let (sender, receiver) = oneshot::channel();
-        let msg = ConnectionMessage::ReliableSend {
-            data,
-            respond_to: sender,
-        };
-        let _ = self.sender.send(msg).await;
-        receiver.await?
-    }
-
-    pub async fn send_clear_text(&self, data: Bytes) -> ConnectionResult<()> {
+    pub async fn send_clear_text(&self, data: ReliableNetworkMessage) -> ConnectionResult<()> {
         let (sender, receiver) = oneshot::channel();
         let msg = ConnectionMessage::SendClearText {
             data,
@@ -305,15 +237,5 @@ impl ConnectionHandle {
         };
         let _ = self.sender.send(msg).await;
         receiver.await?
-    }
-
-    pub async fn add_subscription(&self) -> mpsc::Receiver<Bytes> {
-        let (subscription_sender, subscription_receiver) = mpsc::channel(32);
-        let msg = ConnectionMessage::Subscribe {
-            respond_to: subscription_sender,
-        };
-
-        let _ = self.sender.send(msg).await;
-        subscription_receiver
     }
 }

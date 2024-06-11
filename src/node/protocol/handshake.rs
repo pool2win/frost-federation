@@ -16,10 +16,10 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use super::{Message, PingMessage, ProtocolMessage};
+use super::{Message, ProtocolMessage};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct HandshakeMessage {
     pub message: String,
     pub version: String,
