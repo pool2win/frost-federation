@@ -200,6 +200,8 @@ impl NoiseHandler {
 mod tests {
 
     use super::NoiseHandler;
+    use tokio_util::bytes::Bytes;
+
     static TEST_KEY: &str = "
 -----BEGIN PRIVATE KEY-----
 MFECAQEwBQYDK2VwBCIEIJ7pILqR7yBPsVuysfGyofjOEm19skmtqcJYWiVwjKH1
@@ -208,10 +210,23 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
 ";
 
     #[test]
-    fn it_buids_noise_helper() {
+    fn it_builds_noise_handler() {
         let handler = NoiseHandler::new(true, TEST_KEY.to_string());
         assert!(handler.initiator);
         assert!(handler.handshake_state.is_some());
         assert!(handler.transport_state.is_none());
+    }
+
+    #[test]
+    fn it_builds_initiator_noise_handler() {
+        let mut handler = NoiseHandler::new(true, TEST_KEY.to_string());
+        let noise_message: Bytes = handler.build_handshake_message(b"test bytes");
+        let len = noise_message.len();
+        assert_eq!(&noise_message[(len - 10)..], b"test bytes");
+
+        let mut responder = NoiseHandler::new(false, TEST_KEY.to_string());
+        let read_message: Bytes = responder.read_handshake_message(noise_message);
+        let len = read_message.len();
+        assert_eq!(&read_message[(len - 10)..], b"test bytes");
     }
 }
