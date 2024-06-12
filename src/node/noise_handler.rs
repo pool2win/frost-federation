@@ -30,9 +30,7 @@ use tokio_util::{
 //
 // We use 25519 instead of LN's choice of secp256k1 as
 // rust Noise implementation doesn't yet support secp256k1
-// noise_params: "Noise_XX_25519_ChaChaPoly_SHA256".parse().unwrap(),
 
-// static PATTERN: &str = "Noise_NN_25519_ChaChaPoly_BLAKE2s";
 static PATTERN: &str = "Noise_XX_25519_ChaChaPoly_SHA256";
 const NOISE_MAX_MSG_LENGTH: usize = 65535;
 
