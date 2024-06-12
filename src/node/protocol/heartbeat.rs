@@ -37,22 +37,24 @@ impl ProtocolMessage for HeartbeatMessage {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
+#[cfg(test)]
+mod tests {
 
-//     use crate::node::protocol::{HeartbeatMessage, Message};
+    use std::time::SystemTime;
 
-//     #[test]
-//     fn it_matches_start_message_for_handshake() {
-//         if let Some(Message::Heartbeat(start_message)) = HeartbeatMessage::start() {
-//             assert_eq!(start_message.from, String::from("127.0.0.1:6680"))
-//         }
-//     }
+    use crate::node::protocol::{HeartbeatMessage, Message, ProtocolMessage};
 
-//     #[test]
-//     fn it_matches_response_message_for_correct_handshake_start() {
-//         let start_message = HeartbeatMessage::start().unwrap();
-//         let response = start_message.response_for_received().unwrap();
-//         assert_eq!(response, None);
-//     }
-// }
+    #[test]
+    fn it_matches_start_message_for_handshake() {
+        if let Some(Message::Heartbeat(start_message)) = HeartbeatMessage::start() {
+            assert!(start_message.time < SystemTime::now());
+        }
+    }
+
+    #[test]
+    fn it_matches_response_message_for_correct_handshake_start() {
+        let start_message = HeartbeatMessage::start().unwrap();
+        let response = start_message.response_for_received().unwrap();
+        assert_eq!(response, None);
+    }
+}

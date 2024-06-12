@@ -41,3 +41,28 @@ impl ProtocolMessage for PingMessage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use crate::node::protocol::{Message, PingMessage, ProtocolMessage};
+
+    #[test]
+    fn it_matches_start_message_for_ping() {
+        if let Some(Message::Ping(start_message)) = PingMessage::start() {
+            assert_eq!(start_message.message, "ping".to_string());
+        }
+    }
+
+    #[test]
+    fn it_matches_response_message_for_correct_handshake_start() {
+        let start_message = PingMessage::start().unwrap();
+        let response = start_message.response_for_received().unwrap().unwrap();
+        assert_eq!(
+            response,
+            Message::Ping(PingMessage {
+                message: "pong".to_string()
+            })
+        );
+    }
+}
