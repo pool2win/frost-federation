@@ -24,12 +24,10 @@ use serde::{Deserialize, Serialize};
 
 mod handshake;
 mod heartbeat;
-mod noise_handshake;
 mod ping;
 
 pub use handshake::HandshakeMessage;
 pub use heartbeat::HeartbeatMessage;
-pub use noise_handshake::NoiseHandshakeMessage;
 pub use ping::PingMessage;
 
 use super::reliable_sender::ReliableSenderHandle;
@@ -39,7 +37,6 @@ pub enum Message {
     Handshake(HandshakeMessage),
     Heartbeat(HeartbeatMessage),
     Ping(PingMessage),
-    NoiseHandshake(NoiseHandshakeMessage),
 }
 
 /// Methods for all protocol messages
@@ -62,7 +59,6 @@ impl Message {
             Message::Handshake(m) => m.response_for_received(),
             Message::Heartbeat(m) => m.response_for_received(),
             Message::Ping(m) => m.response_for_received(),
-            Message::NoiseHandshake(m) => m.response_for_received(),
         }
     }
 }
