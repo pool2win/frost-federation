@@ -195,3 +195,23 @@ impl NoiseHandler {
         (reader, writer)
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use super::NoiseHandler;
+    static TEST_KEY: &str = "
+-----BEGIN PRIVATE KEY-----
+MFECAQEwBQYDK2VwBCIEIJ7pILqR7yBPsVuysfGyofjOEm19skmtqcJYWiVwjKH1
+gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
+-----END PRIVATE KEY-----
+";
+
+    #[test]
+    fn it_buids_noise_helper() {
+        let handler = NoiseHandler::new(true, TEST_KEY.to_string());
+        assert!(handler.initiator);
+        assert!(handler.handshake_state.is_some());
+        assert!(handler.transport_state.is_none());
+    }
+}
