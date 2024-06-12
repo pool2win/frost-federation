@@ -20,11 +20,7 @@ use ed25519_dalek::pkcs8::DecodePrivateKey;
 use ed25519_dalek::{SigningKey, SECRET_KEY_LENGTH};
 use futures::{SinkExt, StreamExt};
 use snow::{HandshakeState, Keypair, TransportState};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio_util::{
-    bytes::Bytes,
-    codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
-};
+use tokio_util::bytes::{Bytes, BytesMut};
 
 // TODO[pool2win]: Change this to XK once we have setup pubkey as node id
 //
@@ -80,14 +76,11 @@ impl NoiseHandler {
 
     /// Run the Noise handshake protocol for initiator or responder as
     /// the case may be
-    pub async fn run_handshake(
-        &mut self,
-        reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
-        writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
-    ) -> (
-        FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
-        FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
-    ) {
+    pub async fn run_handshake<R, W>(&mut self, reader: R, writer: W) -> (R, W)
+    where
+        R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
+        W: SinkExt<Bytes> + Unpin,
+    {
         if self.initiator {
             self.initiator_handshake(reader, writer).await
         } else {
@@ -145,14 +138,11 @@ impl NoiseHandler {
 
     /// Run initiator handshake steps. The steps here depend on the
     /// Noise protocol being used
-    async fn initiator_handshake(
-        &mut self,
-        mut reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
-        mut writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
-    ) -> (
-        FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
-        FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
-    ) {
+    async fn initiator_handshake<R, W>(&mut self, mut reader: R, mut writer: W) -> (R, W)
+    where
+        R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
+        W: SinkExt<Bytes> + Unpin,
+    {
         let m1 = self.build_handshake_message(b"-> e");
         log::debug!("m1 : {:?}", m1.clone());
         let _ = writer.send(m1).await;
@@ -171,14 +161,11 @@ impl NoiseHandler {
 
     /// Run initiator handshake steps. The steps here depend on the
     /// Noise protocol being used
-    async fn responder_handshake(
-        &mut self,
-        mut reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
-        mut writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
-    ) -> (
-        FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
-        FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
-    ) {
+    async fn responder_handshake<R, W>(&mut self, mut reader: R, mut writer: W) -> (R, W)
+    where
+        R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
+        W: SinkExt<Bytes> + Unpin,
+    {
         let m1 = reader.next().await.unwrap().unwrap().freeze();
         log::debug!("m1 : {:?}", m1.clone());
         let _ = self.read_handshake_message(m1);
