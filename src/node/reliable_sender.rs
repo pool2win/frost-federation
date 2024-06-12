@@ -203,3 +203,28 @@ impl ReliableSenderHandle {
         receiver.await?
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::node::reliable_sender::ReliableNetworkMessage;
+
+    use crate::node::protocol::{Message, PingMessage};
+    use serde::Serialize;
+    use tokio_util::bytes::Bytes;
+
+    #[test]
+    fn it_serialized_ping_message() {
+        let ping_reliable_message = ReliableNetworkMessage::Send(
+            Message::Ping(PingMessage {
+                message: String::from("ping"),
+            }),
+            1,
+        );
+        let mut s = flexbuffers::FlexbufferSerializer::new();
+        ping_reliable_message.serialize(&mut s).unwrap();
+        let b = Bytes::from(s.take_buffer());
+
+        let msg = ReliableNetworkMessage::from_bytes(&b).unwrap();
+        assert_eq!(msg, ping_reliable_message);
+    }
+}
