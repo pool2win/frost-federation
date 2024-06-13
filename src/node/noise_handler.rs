@@ -216,4 +216,25 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
         let len = read_message.len();
         assert_eq!(&read_message[(len - 10)..], b"test bytes");
     }
+
+    #[test]
+    fn it_should_run_handshake_and_transition_to_transport_state() {
+        let mut initiator = NoiseHandler::new(true, TEST_KEY.to_string());
+        let mut responder = NoiseHandler::new(false, TEST_KEY.to_string());
+
+        let m1 = initiator.build_handshake_message(b"");
+        let _ = responder.read_handshake_message(m1);
+
+        let m2 = responder.build_handshake_message(b"");
+        let _ = initiator.read_handshake_message(m2);
+
+        let m3 = initiator.build_handshake_message(b"");
+        let _ = responder.read_handshake_message(m3);
+
+        initiator.start_transport();
+        assert!(initiator.transport_state.is_some());
+
+        responder.start_transport();
+        assert!(responder.transport_state.is_some());
+    }
 }
