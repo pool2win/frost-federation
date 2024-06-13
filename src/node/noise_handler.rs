@@ -245,4 +245,18 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
         assert!(responder.handshake_state.is_none());
         assert!(responder.transport_state.is_some());
     }
+
+    #[test]
+    fn it_should_build_and_read_transport_messages() {
+        let (mut initiator, mut responder) = build_initiator_responder();
+        let m = initiator.build_transport_message(b"hello world");
+        let m_read = responder.read_transport_message(m);
+
+        assert_eq!(m_read, Bytes::from("hello world"));
+
+        let m = responder.build_transport_message(b"goodbye");
+        let m_read = initiator.read_transport_message(m);
+
+        assert_eq!(m_read, Bytes::from("goodbye"));
+    }
 }
