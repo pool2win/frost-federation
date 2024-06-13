@@ -196,6 +196,25 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
 -----END PRIVATE KEY-----
 ";
 
+    fn build_initiator_responder() -> (NoiseHandler, NoiseHandler) {
+        let mut initiator = NoiseHandler::new(true, TEST_KEY.to_string());
+        let mut responder = NoiseHandler::new(false, TEST_KEY.to_string());
+
+        let m1 = initiator.build_handshake_message(b"");
+        let _ = responder.read_handshake_message(m1);
+
+        let m2 = responder.build_handshake_message(b"");
+        let _ = initiator.read_handshake_message(m2);
+
+        let m3 = initiator.build_handshake_message(b"");
+        let _ = responder.read_handshake_message(m3);
+
+        initiator.start_transport();
+        responder.start_transport();
+
+        (initiator, responder)
+    }
+
     #[test]
     fn it_builds_noise_handler() {
         let handler = NoiseHandler::new(true, TEST_KEY.to_string());
@@ -219,22 +238,11 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
 
     #[test]
     fn it_should_run_handshake_and_transition_to_transport_state() {
-        let mut initiator = NoiseHandler::new(true, TEST_KEY.to_string());
-        let mut responder = NoiseHandler::new(false, TEST_KEY.to_string());
-
-        let m1 = initiator.build_handshake_message(b"");
-        let _ = responder.read_handshake_message(m1);
-
-        let m2 = responder.build_handshake_message(b"");
-        let _ = initiator.read_handshake_message(m2);
-
-        let m3 = initiator.build_handshake_message(b"");
-        let _ = responder.read_handshake_message(m3);
-
-        initiator.start_transport();
+        let (initiator, responder) = build_initiator_responder();
+        assert!(initiator.handshake_state.is_none());
         assert!(initiator.transport_state.is_some());
 
-        responder.start_transport();
+        assert!(responder.handshake_state.is_none());
         assert!(responder.transport_state.is_some());
     }
 }
