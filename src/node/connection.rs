@@ -16,7 +16,10 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use super::{noise_handler::NoiseHandler, reliable_sender::ReliableNetworkMessage};
+use super::{
+    noise_handler::{run_handshake, NoiseHandler, NoiseIO},
+    reliable_sender::ReliableNetworkMessage,
+};
 use futures::sink::SinkExt; // Bring SinkExt in scope for access to `send` calls
 use tokio::{
     net::{
@@ -31,6 +34,8 @@ use tokio_util::{
     codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
 };
 
+pub(crate) type ConnectionReader = FramedRead<OwnedReadHalf, LengthDelimitedCodec>;
+pub(crate) type ConnectionWriter = FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>;
 type ConnectionError = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub(crate) type ConnectionResult<T> = std::result::Result<T, ConnectionError>;
 pub(crate) type ConnectionResultSender = oneshot::Sender<ConnectionResult<()>>;
@@ -49,8 +54,8 @@ pub enum ConnectionMessage {
 
 #[derive(Debug)]
 pub struct ConnectionActor {
-    reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
-    writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
+    reader: ConnectionReader,
+    writer: ConnectionWriter,
     receiver: mpsc::Receiver<ConnectionMessage>,
     subscriber: mpsc::Sender<ReliableNetworkMessage>,
     noise: NoiseHandler,
