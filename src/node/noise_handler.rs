@@ -307,7 +307,8 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
     async fn it_should_run_noise_handshake_protocol_as_responder() {
         let mut noise_mock = MockNoiseIO::default();
 
-        let read_buffer: Vec<Result<BytesMut, std::io::Error>> = vec![Ok(BytesMut::from("m1"))];
+        let read_buffer: Vec<Result<BytesMut, std::io::Error>> =
+            vec![Ok(BytesMut::from("m1")), Ok(BytesMut::from("m3"))];
         let responder_reader = futures::stream::iter(read_buffer);
         let responder_writer: Vec<Bytes> = vec![];
 
@@ -321,6 +322,6 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
 
         noise_mock.expect_start_transport().return_const(());
 
-        let _ = run_handshake(&mut noise_mock, true, responder_reader, responder_writer).await;
+        let _ = run_handshake(&mut noise_mock, false, responder_reader, responder_writer).await;
     }
 }
