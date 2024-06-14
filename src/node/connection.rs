@@ -85,8 +85,7 @@ impl ConnectionActor {
 
         let mut noise = NoiseHandler::new(init, key);
         let (framed_reader, framed_writer) =
-            noise.run_handshake(framed_reader, framed_writer).await;
-        noise.start_transport();
+            run_handshake(&mut noise, init, framed_reader, framed_writer).await;
         log::debug!("Noise transport started");
 
         ConnectionActor {
