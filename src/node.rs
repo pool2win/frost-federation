@@ -16,8 +16,13 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use self::protocol::HandshakeMessage;
-use tokio::net::{TcpListener, TcpStream};
+use self::{protocol::HandshakeMessage, reliable_sender::ReliableNetworkMessage};
+#[mockall_double::double]
+use connection::ConnectionHandle;
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::mpsc::Receiver,
+};
 mod connection;
 mod noise_handler;
 mod protocol;
@@ -85,7 +90,10 @@ impl Node {
             log::debug!("Waiting on accept...");
             let (stream, socket_addr) = listener.accept().await.unwrap();
             log::info!("Accept connection from {}", socket_addr);
-            self.start_reliable_sender_receiver(stream, init).await;
+            let (connection_handle, connection_receiver) =
+                ConnectionHandle::start(stream, self.static_key_pem.clone(), init).await;
+            self.start_reliable_sender_receiver(connection_handle, connection_receiver, init)
+                .await;
         }
     }
 
@@ -99,16 +107,24 @@ impl Node {
             if let Ok(stream) = TcpStream::connect(seed).await {
                 let peer_addr = stream.peer_addr().unwrap();
                 log::info!("Connected to {}", peer_addr);
-                self.start_reliable_sender_receiver(stream, init).await;
+                let (connection_handle, connection_receiver) =
+                    ConnectionHandle::start(stream, self.static_key_pem.clone(), init).await;
+                self.start_reliable_sender_receiver(connection_handle, connection_receiver, init)
+                    .await;
             } else {
                 log::debug!("Failed to connect to seed {}", seed);
             }
         }
     }
 
-    pub async fn start_reliable_sender_receiver(&mut self, stream: TcpStream, init: bool) {
+    pub async fn start_reliable_sender_receiver(
+        &mut self,
+        connection_handle: ConnectionHandle,
+        connection_receiver: Receiver<ReliableNetworkMessage>,
+        init: bool,
+    ) {
         let (reliable_sender_handle, mut application_receiver) =
-            ReliableSenderHandle::start(stream, self.static_key_pem.clone(), init).await;
+            ReliableSenderHandle::start(connection_handle, connection_receiver).await;
         let cloned = reliable_sender_handle.clone();
         tokio::spawn(async move {
             while let Some(message) = application_receiver.recv().await {

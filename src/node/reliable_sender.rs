@@ -16,17 +16,17 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use super::{connection::ConnectionHandle, protocol::Message};
+use super::protocol::Message;
+#[mockall_double::double]
+use crate::node::connection::ConnectionHandle;
 use crate::node::connection::{ConnectionResult, ConnectionResultSender};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
-use tokio::{
-    net::TcpStream,
-    sync::{mpsc, oneshot},
-};
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::bytes::Bytes;
 
+#[derive(Debug)]
 enum ReliableMessage {
     Send {
         message: Message,                   // Message to send
@@ -159,6 +159,9 @@ async fn start_reliable_sender(mut actor: ReliableSenderActor) {
                     log::info!("Error handling received message. Shutting down. {}", e);
                 }
             },
+            else => {
+                log::info!("Bad message for reliable sender actor");
+            }
         }
     }
 }
@@ -170,7 +173,8 @@ pub(crate) struct ReliableSenderHandle {
 
 mockall::mock! {
     pub ReliableSenderHandle {
-        pub async fn start(stream: TcpStream, key: String, init: bool) -> (Self, mpsc::Receiver<Message>);
+        pub async fn start(connection_handle: ConnectionHandle, connection_receiver: mpsc::Receiver<ReliableNetworkMessage>) ->
+            (Self, mpsc::Receiver<Message>);
         pub async fn send(&self, message: Message) -> ConnectionResult<()>;
     }
     impl Clone for ReliableSenderHandle {
@@ -180,12 +184,9 @@ mockall::mock! {
 
 impl ReliableSenderHandle {
     pub async fn start(
-        stream: TcpStream,
-        key: String,
-        init: bool,
+        connection_handle: ConnectionHandle,
+        connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
     ) -> (Self, mpsc::Receiver<Message>) {
-        let (connection_handle, connection_receiver) =
-            ConnectionHandle::start(stream, key, init).await;
         let (sender, receiver) = mpsc::channel(32);
         let (application_sender, application_receiver) = mpsc::channel(32);
 
@@ -216,11 +217,14 @@ impl ReliableSenderHandle {
 
 #[cfg(test)]
 mod tests {
-    use crate::node::reliable_sender::ReliableNetworkMessage;
-
-    use crate::node::protocol::{Message, PingMessage};
+    use super::ReliableNetworkMessage;
+    use crate::node::connection::MockConnectionHandle;
+    use crate::node::protocol::{Message, PingMessage, ProtocolMessage};
     use serde::Serialize;
+    use tokio::sync::mpsc;
     use tokio_util::bytes::Bytes;
+
+    use super::ReliableSenderHandle;
 
     #[test]
     fn it_serializes_ping_message() {
@@ -237,4 +241,27 @@ mod tests {
         let msg = ReliableNetworkMessage::from_bytes(&b).unwrap();
         assert_eq!(msg, ping_reliable_message);
     }
+
+    #[tokio::test]
+    async fn it_should_successfully_send_message_to_actor_and_receieve_an_ack() {
+        let (connection_sender, connection_receiver) = mpsc::channel(32);
+        let mut mock_connection_handle = MockConnectionHandle::default();
+        mock_connection_handle.expect_send().return_once(|_| Ok(()));
+
+        let (reliable_sender_handler, _application_receiver) =
+            ReliableSenderHandle::start(mock_connection_handle, connection_receiver).await;
+
+        let message = PingMessage::start().unwrap();
+
+        let ack_task = tokio::spawn(async move {
+            let _ = connection_sender.send(ReliableNetworkMessage::Ack(1)).await;
+        });
+
+        let send_task = reliable_sender_handler.send(message);
+
+        let (send_result, _) = tokio::join!(send_task, ack_task);
+        assert!(send_result.is_ok());
+    }
+
+    //async fn it_should_successfully_send_message_to_actor_timeout_if_no_ack_received() {
 }
