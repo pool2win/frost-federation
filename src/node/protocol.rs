@@ -16,8 +16,6 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use std::error::Error;
-use tokio_util::bytes::Bytes;
 extern crate flexbuffers;
 extern crate serde;
 use serde::{Deserialize, Serialize};
@@ -30,6 +28,7 @@ pub use handshake::HandshakeMessage;
 pub use heartbeat::HeartbeatMessage;
 pub use ping::PingMessage;
 
+#[mockall_double::double]
 use super::reliable_sender::ReliableSenderHandle;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -51,16 +50,14 @@ impl Message {
     }
 }
 
-pub async fn start_protocol<M>(handle: ReliableSenderHandle, init: bool)
+pub async fn start_protocol<M>(handle: ReliableSenderHandle)
 where
     M: ProtocolMessage,
 {
-    if init {
-        if let Some(message) = M::start() {
-            log::debug!("Sending initial handshake message");
-            if let Err(e) = handle.send(message).await {
-                log::info!("Error sending start protocol message {}", e);
-            }
+    if let Some(message) = M::start() {
+        log::debug!("Sending initial handshake message");
+        if let Err(e) = handle.send(message).await {
+            log::info!("Error sending start protocol message {}", e);
         }
     }
 }
@@ -76,9 +73,13 @@ where
 
 #[cfg(test)]
 mod tests {
+
+    use super::start_protocol;
+    use super::HandshakeMessage;
     use super::Message;
     use super::PingMessage;
     use super::ProtocolMessage;
+    use crate::node::reliable_sender::MockReliableSenderHandle;
 
     #[test]
     fn it_matches_start_message_for_ping() {
@@ -104,5 +105,23 @@ mod tests {
                 message: String::from("pong")
             }))
         );
+    }
+
+    #[tokio::test]
+    async fn it_should_send_first_message_on_start_protocol() {
+        let mut handle_mock = MockReliableSenderHandle::default();
+
+        handle_mock.expect_send().return_once(|_| Ok(()));
+        start_protocol::<HandshakeMessage>(handle_mock).await;
+    }
+
+    #[tokio::test]
+    async fn it_should_quitely_move_on_if_error_on_start_protocol() {
+        let mut handle_mock = MockReliableSenderHandle::default();
+
+        handle_mock
+            .expect_send()
+            .return_once(|_| Err("Some error".into()));
+        start_protocol::<HandshakeMessage>(handle_mock).await;
     }
 }

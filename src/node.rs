@@ -23,6 +23,9 @@ mod noise_handler;
 mod protocol;
 mod reliable_sender;
 
+#[mockall_double::double]
+use crate::node::reliable_sender::ReliableSenderHandle;
+
 #[derive(Debug)]
 pub struct Node {
     pub seeds: Vec<String>,
@@ -105,8 +108,7 @@ impl Node {
 
     pub async fn start_reliable_sender_receiver(&mut self, stream: TcpStream, init: bool) {
         let (reliable_sender_handle, mut application_receiver) =
-            reliable_sender::ReliableSenderHandle::start(stream, self.static_key_pem.clone(), init)
-                .await;
+            ReliableSenderHandle::start(stream, self.static_key_pem.clone(), init).await;
         let cloned = reliable_sender_handle.clone();
         tokio::spawn(async move {
             while let Some(message) = application_receiver.recv().await {
@@ -127,6 +129,8 @@ impl Node {
             log::debug!("Connection clean up");
         });
         // Start the first protocol to start interaction between nodes
-        protocol::start_protocol::<HandshakeMessage>(reliable_sender_handle, init).await;
+        if init {
+            protocol::start_protocol::<HandshakeMessage>(reliable_sender_handle).await;
+        }
     }
 }

@@ -168,6 +168,16 @@ pub(crate) struct ReliableSenderHandle {
     sender: mpsc::Sender<ReliableMessage>,
 }
 
+mockall::mock! {
+    pub ReliableSenderHandle {
+        pub async fn start(stream: TcpStream, key: String, init: bool) -> (Self, mpsc::Receiver<Message>);
+        pub async fn send(&self, message: Message) -> ConnectionResult<()>;
+    }
+    impl Clone for ReliableSenderHandle {
+        fn clone(&self) -> Self;
+    }
+}
+
 impl ReliableSenderHandle {
     pub async fn start(
         stream: TcpStream,
