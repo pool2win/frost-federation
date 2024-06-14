@@ -19,7 +19,6 @@
 use ed25519_dalek::pkcs8::DecodePrivateKey;
 use ed25519_dalek::{SigningKey, SECRET_KEY_LENGTH};
 use futures::{SinkExt, StreamExt};
-use mockall::*;
 use snow::{HandshakeState, Keypair, TransportState};
 use tokio_util::bytes::{Bytes, BytesMut};
 
@@ -40,7 +39,7 @@ fn build_keypair(key: &str) -> Result<Keypair, snow::Error> {
     })
 }
 
-#[automock]
+#[mockall::automock]
 pub trait NoiseIO {
     fn new(init: bool, pem_key: String) -> Self;
     fn start_transport(&mut self);
