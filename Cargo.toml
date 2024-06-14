@@ -19,3 +19,5 @@ futures = "0.3.30"
 snow = "0.9.6"
 ed25519-dalek = { version = "2.1.1", features = ["pkcs8", "pem"] }
 flexbuffers = "2.0.0"
+mockall = "0.12.1"
+mockall_double = "0.3.1"

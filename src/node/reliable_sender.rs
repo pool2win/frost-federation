@@ -213,7 +213,7 @@ mod tests {
     use tokio_util::bytes::Bytes;
 
     #[test]
-    fn it_serialized_ping_message() {
+    fn it_serializes_ping_message() {
         let ping_reliable_message = ReliableNetworkMessage::Send(
             Message::Ping(PingMessage {
                 message: String::from("ping"),
