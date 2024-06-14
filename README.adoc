@@ -47,3 +47,13 @@ synchronised data, before it generates a threshold signature.
 . This allows clients to use the federation as a BFT validation and
 signature generation service
 
+== Build Status
+
+[link=https://github.com/pool2win/frost-federation/actions/workflows/tests.yml]
+image::https://github.com/pool2win/frost-federation/actions/workflows/tests.yml/badge.svg[Rust CI]
+
+== Coverage
+
+[link=https://codecov.io/gh/pool2win/frost-federation]
+image::https://codecov.io/gh/pool2win/frost-federation/graphs/icicle.svg?token=W3FWIFM232[Codecov]
+
