@@ -232,14 +232,11 @@ impl ConnectionHandle {
         let _ = self.sender.send(msg).await;
         receiver.await?
     }
+}
 
-    pub async fn send_clear_text(&self, data: ReliableNetworkMessage) -> ConnectionResult<()> {
-        let (sender, receiver) = oneshot::channel();
-        let msg = ConnectionMessage::SendClearText {
-            data,
-            respond_to: sender,
-        };
-        let _ = self.sender.send(msg).await;
-        receiver.await?
+mockall::mock! {
+    pub ConnectionHandle {
+        pub async fn start(tcp_stream: TcpStream, key: String, init: bool,) -> (Self, mpsc::Receiver<ReliableNetworkMessage>);
+        pub async fn send(&self, data: ReliableNetworkMessage) -> ConnectionResult<()>;
     }
 }
