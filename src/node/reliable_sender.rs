@@ -242,6 +242,20 @@ mod tests {
         assert_eq!(msg, ping_reliable_message);
     }
 
+    #[test]
+    fn it_serializes_ping_message_using_as_bytes() {
+        let ping_reliable_message = ReliableNetworkMessage::Send(
+            Message::Ping(PingMessage {
+                message: String::from("ping"),
+            }),
+            1,
+        );
+        let serialized = ping_reliable_message.as_bytes().unwrap();
+
+        let msg = ReliableNetworkMessage::from_bytes(&serialized).unwrap();
+        assert_eq!(msg, ping_reliable_message);
+    }
+
     #[tokio::test]
     async fn it_should_successfully_send_message_to_actor_and_receieve_an_ack() {
         let (connection_sender, connection_receiver) = mpsc::channel(32);
