@@ -122,6 +122,7 @@ impl ReliableSenderActor {
                     .await
                 {
                     log::info!("Error sending ack {}", e);
+                    return Err("Error sending ack".into());
                 }
                 // send message up to the application
                 if let Err(e) = self.application_sender.send(message).await {
@@ -309,5 +310,43 @@ mod tests {
 
         let send_result = reliable_sender_handler.send(message).await;
         assert!(send_result.is_err());
+    }
+
+    #[tokio::test]
+    async fn it_should_successfully_send_ack_when_message_received() {
+        let (connection_sender, connection_receiver) = mpsc::channel(32);
+        let mut mock_connection_handle = MockConnectionHandle::default();
+        mock_connection_handle.expect_send().return_once(|_| Ok(()));
+
+        let (_reliable_sender_handler, mut application_receiver) =
+            ReliableSenderHandle::start(mock_connection_handle, connection_receiver, 500).await;
+
+        let message = PingMessage::start().unwrap();
+        let _ = connection_sender
+            .send(ReliableNetworkMessage::Send(message.clone(), 1))
+            .await;
+
+        let received = application_receiver.recv().await;
+        assert_eq!(received, Some(message));
+    }
+
+    #[tokio::test]
+    async fn it_should_handle_error_on_message_received() {
+        let (connection_sender, connection_receiver) = mpsc::channel(32);
+        let mut mock_connection_handle = MockConnectionHandle::default();
+        mock_connection_handle
+            .expect_send()
+            .return_once(|_| Err("Some error".into()));
+
+        let (_reliable_sender_handler, mut application_receiver) =
+            ReliableSenderHandle::start(mock_connection_handle, connection_receiver, 500).await;
+
+        let message = PingMessage::start().unwrap();
+        let _ = connection_sender
+            .send(ReliableNetworkMessage::Send(message.clone(), 1))
+            .await;
+
+        let result = application_receiver.try_recv();
+        assert!(result.is_err());
     }
 }
