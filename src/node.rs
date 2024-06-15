@@ -36,6 +36,7 @@ pub struct Node {
     pub seeds: Vec<String>,
     pub bind_address: String,
     pub static_key_pem: String,
+    pub delivery_timeout: u64,
 }
 
 impl Node {
@@ -45,6 +46,7 @@ impl Node {
             seeds: vec!["localhost:6680".to_string()],
             bind_address: "localhost".to_string(),
             static_key_pem: String::new(),
+            delivery_timeout: 500,
         }
     }
 
@@ -63,6 +65,12 @@ impl Node {
     pub fn static_key_pem(self, key: String) -> Self {
         let mut node = self;
         node.static_key_pem = key;
+        node
+    }
+
+    pub fn delivery_timeout(self, timeout: u64) -> Self {
+        let mut node = self;
+        node.delivery_timeout = timeout;
         node
     }
 
@@ -123,8 +131,12 @@ impl Node {
         connection_receiver: Receiver<ReliableNetworkMessage>,
         init: bool,
     ) {
-        let (reliable_sender_handle, mut application_receiver) =
-            ReliableSenderHandle::start(connection_handle, connection_receiver).await;
+        let (reliable_sender_handle, mut application_receiver) = ReliableSenderHandle::start(
+            connection_handle,
+            connection_receiver,
+            self.delivery_timeout,
+        )
+        .await;
         let cloned = reliable_sender_handle.clone();
         tokio::spawn(async move {
             while let Some(message) = application_receiver.recv().await {

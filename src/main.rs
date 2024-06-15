@@ -44,7 +44,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut node = node::Node::new()
         .seeds(config.peer.seeds)
         .bind_address(bind_address)
-        .static_key_pem(config.noise.key);
+        .static_key_pem(config.noise.key)
+        .delivery_timeout(config.peer.delivery_timeout);
 
     node.start().await;
     Ok(())

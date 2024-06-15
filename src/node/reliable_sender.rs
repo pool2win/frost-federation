@@ -170,11 +170,12 @@ async fn start_reliable_sender(mut actor: ReliableSenderActor) {
 #[derive(Clone)]
 pub(crate) struct ReliableSenderHandle {
     sender: mpsc::Sender<ReliableMessage>,
+    delivery_timeout: u64,
 }
 
 mockall::mock! {
     pub ReliableSenderHandle {
-        pub async fn start(connection_handle: ConnectionHandle, connection_receiver: mpsc::Receiver<ReliableNetworkMessage>) ->
+        pub async fn start(connection_handle: ConnectionHandle, connection_receiver: mpsc::Receiver<ReliableNetworkMessage>, delivery_timeout: u64) ->
             (Self, mpsc::Receiver<Message>);
         pub async fn send(&self, message: Message) -> ConnectionResult<()>;
     }
@@ -187,6 +188,7 @@ impl ReliableSenderHandle {
     pub async fn start(
         connection_handle: ConnectionHandle,
         connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
+        delivery_timeout: u64,
     ) -> (Self, mpsc::Receiver<Message>) {
         let (sender, receiver) = mpsc::channel(32);
         let (application_sender, application_receiver) = mpsc::channel(32);
@@ -199,7 +201,13 @@ impl ReliableSenderHandle {
         );
         tokio::spawn(start_reliable_sender(actor));
 
-        (ReliableSenderHandle { sender }, application_receiver)
+        (
+            ReliableSenderHandle {
+                sender,
+                delivery_timeout,
+            },
+            application_receiver,
+        )
     }
 
     pub async fn send(&self, message: Message) -> ConnectionResult<()> {
@@ -212,7 +220,13 @@ impl ReliableSenderHandle {
             log::info!("Error sending message to actor. Shutting down. {}", e);
             return Err("Error sending message to actor.".into());
         }
-        if timeout(Duration::from_millis(500), receiver).await.is_err() {
+        if timeout(
+            Duration::from_millis(self.delivery_timeout.into()),
+            receiver,
+        )
+        .await
+        .is_err()
+        {
             Err("Reliable send failed on time out".into())
         } else {
             Ok(())
@@ -268,7 +282,7 @@ mod tests {
         mock_connection_handle.expect_send().return_once(|_| Ok(()));
 
         let (reliable_sender_handler, _application_receiver) =
-            ReliableSenderHandle::start(mock_connection_handle, connection_receiver).await;
+            ReliableSenderHandle::start(mock_connection_handle, connection_receiver, 500).await;
 
         let message = PingMessage::start().unwrap();
 
@@ -289,7 +303,7 @@ mod tests {
         mock_connection_handle.expect_send().return_once(|_| Ok(()));
 
         let (reliable_sender_handler, _application_receiver) =
-            ReliableSenderHandle::start(mock_connection_handle, connection_receiver).await;
+            ReliableSenderHandle::start(mock_connection_handle, connection_receiver, 500).await;
 
         let message = PingMessage::start().unwrap();
 
