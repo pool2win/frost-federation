@@ -21,9 +21,10 @@ use super::protocol::Message;
 use crate::node::connection::ConnectionHandle;
 use crate::node::connection::{ConnectionResult, ConnectionResultSender};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::error::Error;
+use std::{collections::HashMap, time::Duration};
 use tokio::sync::{mpsc, oneshot};
+use tokio::time::timeout;
 use tokio_util::bytes::Bytes;
 
 #[derive(Debug)]
@@ -211,7 +212,11 @@ impl ReliableSenderHandle {
             log::info!("Error sending message to actor. Shutting down. {}", e);
             return Err("Error sending message to actor.".into());
         }
-        receiver.await?
+        if timeout(Duration::from_millis(500), receiver).await.is_err() {
+            Err("Reliable send failed on time out".into())
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -277,5 +282,18 @@ mod tests {
         assert!(send_result.is_ok());
     }
 
-    //async fn it_should_successfully_send_message_to_actor_timeout_if_no_ack_received() {
+    #[tokio::test]
+    async fn it_should_successfully_send_message_to_actor_timeout_if_no_ack_received() {
+        let (_connection_sender, connection_receiver) = mpsc::channel(32);
+        let mut mock_connection_handle = MockConnectionHandle::default();
+        mock_connection_handle.expect_send().return_once(|_| Ok(()));
+
+        let (reliable_sender_handler, _application_receiver) =
+            ReliableSenderHandle::start(mock_connection_handle, connection_receiver).await;
+
+        let message = PingMessage::start().unwrap();
+
+        let send_result = reliable_sender_handler.send(message).await;
+        assert!(send_result.is_err());
+    }
 }
