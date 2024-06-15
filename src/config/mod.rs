@@ -78,6 +78,9 @@ pub struct PeerConfig {
 
     #[serde(default = "default_heartbeat_interval")]
     pub heartbeat_interval: u64,
+
+    #[serde(default = "default_delivery_timeout")]
+    pub delivery_timeout: u64,
 }
 
 fn default_seeds() -> Vec<String> {
@@ -100,6 +103,10 @@ fn default_heartbeat_interval() -> u64 {
     PeerConfig::default().heartbeat_interval
 }
 
+fn default_delivery_timeout() -> u64 {
+    PeerConfig::default().delivery_timeout
+}
+
 impl Default for PeerConfig {
     fn default() -> Self {
         PeerConfig {
@@ -108,6 +115,7 @@ impl Default for PeerConfig {
             max_pending_messages: 32,
             max_pending_send_to_all: 128,
             heartbeat_interval: 1000,
+            delivery_timeout: 500, // ms
         }
     }
 }
@@ -176,6 +184,7 @@ mod tests {
         assert_eq!(peer.max_pending_messages, 32);
         assert_eq!(peer.max_pending_send_to_all, 128);
         assert_eq!(peer.heartbeat_interval, 1000);
+        assert_eq!(peer.delivery_timeout, 500);
     }
 
     #[test]
@@ -188,6 +197,7 @@ mod tests {
         assert_eq!(conf.peer.max_pending_messages, 32);
         assert_eq!(conf.peer.max_pending_send_to_all, 128);
         assert_eq!(conf.peer.heartbeat_interval, 1000);
+        assert_eq!(conf.peer.delivery_timeout, 500);
     }
 
     #[test]
@@ -212,6 +222,7 @@ mod tests {
         assert_eq!(conf.peer.max_pending_messages, 32);
         assert_eq!(conf.peer.max_pending_send_to_all, 128);
         assert_eq!(conf.peer.heartbeat_interval, 1000);
+        assert_eq!(conf.peer.delivery_timeout, 500);
     }
 
     #[test]
@@ -230,6 +241,7 @@ mod tests {
         assert_eq!(conf.peer.max_pending_messages, 32);
         assert_eq!(conf.peer.max_pending_send_to_all, 128);
         assert_eq!(conf.peer.heartbeat_interval, 1000);
+        assert_eq!(conf.peer.delivery_timeout, 500);
     }
 
     #[test]
@@ -248,6 +260,7 @@ mod tests {
         assert_eq!(conf.peer.max_pending_messages, 32);
         assert_eq!(conf.peer.max_pending_send_to_all, 128);
         assert_eq!(conf.peer.heartbeat_interval, 1000);
+        assert_eq!(conf.peer.delivery_timeout, 500);
     }
 
     #[test]
@@ -270,6 +283,7 @@ mod tests {
         assert_eq!(peer.max_pending_messages, 32);
         assert_eq!(peer.max_pending_send_to_all, 128);
         assert_eq!(peer.heartbeat_interval, 1000);
+        assert_eq!(peer.delivery_timeout, 500);
     }
 
     #[test]
@@ -285,6 +299,7 @@ mod tests {
         assert_eq!(peer.max_pending_messages, 32);
         assert_eq!(peer.max_pending_send_to_all, 128);
         assert_eq!(peer.heartbeat_interval, 1000);
+        assert_eq!(peer.delivery_timeout, 500);
         assert_ne!(conf.noise.key.len(), 0);
     }
 
@@ -302,6 +317,7 @@ mod tests {
         assert_eq!(peer.max_pending_messages, 32);
         assert_eq!(peer.max_pending_send_to_all, 128);
         assert_eq!(peer.heartbeat_interval, 1000);
+        assert_eq!(peer.delivery_timeout, 500);
     }
 
     #[test]
