@@ -98,8 +98,9 @@ impl Node {
             log::debug!("Waiting on accept...");
             let (stream, socket_addr) = listener.accept().await.unwrap();
             log::info!("Accept connection from {}", socket_addr);
+            let (reader, writer) = stream.into_split();
             let (connection_handle, connection_receiver) =
-                ConnectionHandle::start(stream, self.static_key_pem.clone(), init).await;
+                ConnectionHandle::start(reader, writer, self.static_key_pem.clone(), init).await;
             self.start_reliable_sender_receiver(connection_handle, connection_receiver, init)
                 .await;
         }
@@ -115,8 +116,10 @@ impl Node {
             if let Ok(stream) = TcpStream::connect(seed).await {
                 let peer_addr = stream.peer_addr().unwrap();
                 log::info!("Connected to {}", peer_addr);
+                let (reader, writer) = stream.into_split();
                 let (connection_handle, connection_receiver) =
-                    ConnectionHandle::start(stream, self.static_key_pem.clone(), init).await;
+                    ConnectionHandle::start(reader, writer, self.static_key_pem.clone(), init)
+                        .await;
                 self.start_reliable_sender_receiver(connection_handle, connection_receiver, init)
                     .await;
             } else {

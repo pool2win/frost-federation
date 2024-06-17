@@ -22,10 +22,7 @@ use super::{
 };
 use futures::sink::SinkExt; // Bring SinkExt in scope for access to `send` calls
 use tokio::{
-    net::{
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpStream,
-    },
+    io::{AsyncRead, AsyncWrite},
     sync::{mpsc, oneshot},
 };
 use tokio_stream::StreamExt; // Bring StreamExt in scope for access to `next` calls
@@ -34,8 +31,6 @@ use tokio_util::{
     codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
 };
 
-pub(crate) type ConnectionReader = FramedRead<OwnedReadHalf, LengthDelimitedCodec>;
-pub(crate) type ConnectionWriter = FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>;
 type ConnectionError = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub(crate) type ConnectionResult<T> = std::result::Result<T, ConnectionError>;
 pub(crate) type ConnectionResultSender = oneshot::Sender<ConnectionResult<()>>;
@@ -53,35 +48,40 @@ pub enum ConnectionMessage {
 }
 
 #[derive(Debug)]
-pub struct ConnectionActor {
-    reader: ConnectionReader,
-    writer: ConnectionWriter,
+pub struct ConnectionActor<R, W> {
+    reader: FramedRead<R, LengthDelimitedCodec>,
+    writer: FramedWrite<W, LengthDelimitedCodec>,
     receiver: mpsc::Receiver<ConnectionMessage>,
     subscriber: mpsc::Sender<ReliableNetworkMessage>,
     noise: NoiseHandler,
 }
 
-impl ConnectionActor {
+impl<R, W> ConnectionActor<R, W>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
     /// Build a new connection struct to work with the TcpStream
     pub async fn start(
-        stream: TcpStream,
+        reader: R,
+        writer: W,
         receiver: mpsc::Receiver<ConnectionMessage>,
         subscription_sender: mpsc::Sender<ReliableNetworkMessage>,
         key: String,
         init: bool,
     ) -> Self {
         // Set up a length delimted codec
-        let (r, w) = stream.into_split();
+
         let framed_reader = LengthDelimitedCodec::builder()
             .length_field_offset(0)
             .length_field_length(2)
             .length_adjustment(0)
-            .new_read(r);
+            .new_read(reader);
         let framed_writer = LengthDelimitedCodec::builder()
             .length_field_offset(0)
             .length_field_length(2)
             .length_adjustment(0)
-            .new_write(w);
+            .new_write(writer);
 
         let mut noise = NoiseHandler::new(init, key);
         let (framed_reader, framed_writer) =
@@ -166,7 +166,11 @@ impl ConnectionActor {
     }
 }
 
-pub async fn run_connection_actor(mut actor: ConnectionActor) {
+pub async fn run_connection_actor<R, W>(mut actor: ConnectionActor<R, W>)
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
     loop {
         tokio::select! {
             Some(message) = actor.receiver.recv() => { // read next command from handle
@@ -185,7 +189,7 @@ pub async fn run_connection_actor(mut actor: ConnectionActor) {
                         }
                         let msg = message.unwrap().freeze();
                         log::debug!("Received from network {:?}", msg.clone());
-                        actor.handle_received(msg.clone()).await.unwrap();
+                         actor.handle_received(msg.clone()).await.unwrap();
                     },
                     None => { // Stream closed, return to clear up connection
                         log::debug!("Connection actor reader closed");
@@ -207,16 +211,21 @@ pub struct ConnectionHandle {
 }
 
 impl ConnectionHandle {
-    pub async fn start(
-        tcp_stream: TcpStream,
+    pub async fn start<R, W>(
+        reader: R,
+        writer: W,
         key: String,
         init: bool,
-    ) -> (Self, mpsc::Receiver<ReliableNetworkMessage>) {
+    ) -> (Self, mpsc::Receiver<ReliableNetworkMessage>)
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
         let (sender, receiver) = mpsc::channel(32);
         let (subscription_sender, subscription_receiver) = mpsc::channel(32);
 
         let connection_actor =
-            ConnectionActor::start(tcp_stream, receiver, subscription_sender, key, init).await;
+            ConnectionActor::start(reader, writer, receiver, subscription_sender, key, init).await;
         tokio::spawn(run_connection_actor(connection_actor));
 
         (Self { sender }, subscription_receiver)
@@ -236,7 +245,42 @@ impl ConnectionHandle {
 
 mockall::mock! {
     pub ConnectionHandle {
-        pub async fn start(tcp_stream: TcpStream, key: String, init: bool,) -> (Self, mpsc::Receiver<ReliableNetworkMessage>);
+        pub async fn start<R, W>(reader: R, writer: W, key: String, init: bool,) -> (Self, mpsc::Receiver<ReliableNetworkMessage>) where R: AsyncRead + Unpin + Send + 'static, W: AsyncWrite + Unpin + Send + 'static;
         pub async fn send(&self, data: ReliableNetworkMessage) -> ConnectionResult<()>;
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ConnectionHandle;
+    // use crate::node::protocol::{PingMessage, ProtocolMessage};
+    // use crate::node::reliable_sender::ReliableNetworkMessage;
+    use tokio_test::io::Builder;
+
+    #[tokio::test]
+    async fn it_should_start_connection() {
+        let async_reader = Builder::new().read(b"hello world").build();
+        let async_writer = Builder::new().write(b"hello world").build();
+
+        let (_handle, mut _receiver) =
+            ConnectionHandle::start(async_reader, async_writer, "test key".to_string(), true).await;
+    }
+
+    // #[tokio::test]
+    // async fn it_should_start_connection_and_send_receive_message() {
+    //     let async_reader = Builder::new().read(b"hello world").build();
+    //     let async_writer = Builder::new().write(b"hello world").build();
+
+    //     let (handle, mut receiver) =
+    //         ConnectionHandle::start(async_reader, async_writer, "test key".to_string(), true).await;
+
+    //     let msg = ReliableNetworkMessage::Send(PingMessage::start().unwrap(), 1);
+    //     let _ = handle.send(msg).await;
+
+    //     let received_msg = receiver.recv().await.unwrap();
+    //     assert_eq!(
+    //         received_msg,
+    //         ReliableNetworkMessage::Send(PingMessage::start().unwrap(), 2)
+    //     );
+    // }
 }
