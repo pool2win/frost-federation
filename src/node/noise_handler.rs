@@ -18,9 +18,8 @@
 
 use ed25519_dalek::pkcs8::DecodePrivateKey;
 use ed25519_dalek::{SigningKey, SECRET_KEY_LENGTH};
-use futures::{SinkExt, StreamExt};
 use snow::{HandshakeState, Keypair, TransportState};
-use tokio_util::bytes::{Bytes, BytesMut};
+use tokio_util::bytes::Bytes;
 
 // TODO[pool2win]: Change this to XK once we have setup pubkey as node id
 //
@@ -133,81 +132,93 @@ impl NoiseIO for NoiseHandler {
     }
 }
 
-/// Run the Noise handshake protocol for initiator or responder as
-/// the case may be
-pub async fn run_handshake<R, W>(
-    noise: &mut impl NoiseIO,
-    initiator: bool,
-    reader: R,
-    writer: W,
-) -> (R, W)
-where
-    R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
-    W: SinkExt<Bytes> + Unpin,
-{
-    let (reader, writer) = if initiator {
-        initiator_handshake(noise, reader, writer).await
-    } else {
-        responder_handshake(noise, reader, writer).await
-    };
-    noise.start_transport();
-    (reader, writer)
-}
+/// handshake functions are in a separate module. This makes it
+/// possible to mock them using mockall for unit testing.
+pub mod handshake {
+    use super::*;
+    use futures::{SinkExt, StreamExt};
+    use tokio_util::bytes::{Bytes, BytesMut};
 
-/// Run initiator handshake steps. The steps here depend on the
-/// Noise protocol being used
-pub async fn initiator_handshake<R, W>(
-    noise: &mut impl NoiseIO,
-    mut reader: R,
-    mut writer: W,
-) -> (R, W)
-where
-    R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
-    W: SinkExt<Bytes> + Unpin,
-{
-    let m1 = noise.build_handshake_message(b"-> e");
-    log::debug!("m1 : {:?}", m1.clone());
-    let _ = writer.send(m1).await;
+    /// Run the Noise handshake protocol for initiator or responder as
+    /// the case may be
+    pub async fn run_handshake<R, W>(
+        noise: &mut impl NoiseIO,
+        initiator: bool,
+        reader: R,
+        writer: W,
+    ) -> (R, W)
+    where
+        R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
+        W: SinkExt<Bytes> + Unpin,
+    {
+        let (reader, writer) = if initiator {
+            initiator_handshake(noise, reader, writer).await
+        } else {
+            responder_handshake(noise, reader, writer).await
+        };
+        noise.start_transport();
+        (reader, writer)
+    }
 
-    let m2 = reader.next().await.unwrap().unwrap().freeze();
-    log::debug!("m2 : {:?}", m2.clone());
-    let _ = noise.read_handshake_message(m2);
+    /// Run initiator handshake steps. The steps here depend on the
+    /// Noise protocol being used
+    pub async fn initiator_handshake<R, W>(
+        noise: &mut impl NoiseIO,
+        mut reader: R,
+        mut writer: W,
+    ) -> (R, W)
+    where
+        R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
+        W: SinkExt<Bytes> + Unpin,
+    {
+        let m1 = noise.build_handshake_message(b"-> e");
+        log::debug!("m1 : {:?}", m1.clone());
+        let _ = writer.send(m1).await;
 
-    let m3 = noise.build_handshake_message(b"-> s, se");
-    log::debug!("m3 : {:?}", m3.clone());
-    let _ = writer.send(m3).await;
+        let m2 = reader.next().await.unwrap().unwrap().freeze();
+        log::debug!("m2 : {:?}", m2.clone());
+        let _ = noise.read_handshake_message(m2);
 
-    log::info!("Noise channel ready");
-    (reader, writer)
-}
+        let m3 = noise.build_handshake_message(b"-> s, se");
+        log::debug!("m3 : {:?}", m3.clone());
+        let _ = writer.send(m3).await;
 
-/// Run initiator handshake steps. The steps here depend on the
-/// Noise protocol being used
-async fn responder_handshake<R, W>(noise: &mut impl NoiseIO, mut reader: R, mut writer: W) -> (R, W)
-where
-    R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
-    W: SinkExt<Bytes> + Unpin,
-{
-    let m1 = reader.next().await.unwrap().unwrap().freeze();
-    log::debug!("m1 : {:?}", m1.clone());
-    let _ = noise.read_handshake_message(m1);
+        log::info!("Noise channel ready");
+        (reader, writer)
+    }
 
-    let m2 = noise.build_handshake_message(b"<- e, ee, s, es");
-    log::debug!("m2 : {:?}", m2.clone());
-    let _ = writer.send(m2).await;
+    /// Run initiator handshake steps. The steps here depend on the
+    /// Noise protocol being used
+    async fn responder_handshake<R, W>(
+        noise: &mut impl NoiseIO,
+        mut reader: R,
+        mut writer: W,
+    ) -> (R, W)
+    where
+        R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
+        W: SinkExt<Bytes> + Unpin,
+    {
+        let m1 = reader.next().await.unwrap().unwrap().freeze();
+        log::debug!("m1 : {:?}", m1.clone());
+        let _ = noise.read_handshake_message(m1);
 
-    let m3 = reader.next().await.unwrap().unwrap().freeze();
-    log::debug!("m3 : {:?}", m3.clone());
-    let _ = noise.read_handshake_message(m3);
+        let m2 = noise.build_handshake_message(b"<- e, ee, s, es");
+        log::debug!("m2 : {:?}", m2.clone());
+        let _ = writer.send(m2).await;
 
-    log::info!("Noise channel ready");
-    (reader, writer)
+        let m3 = reader.next().await.unwrap().unwrap().freeze();
+        log::debug!("m3 : {:?}", m3.clone());
+        let _ = noise.read_handshake_message(m3);
+
+        log::info!("Noise channel ready");
+        (reader, writer)
+    }
 }
 
 #[cfg(test)]
 mod tests {
 
-    use super::{run_handshake, MockNoiseIO, NoiseHandler, NoiseIO};
+    use super::{handshake, MockNoiseIO, NoiseHandler, NoiseIO};
     use tokio_util::bytes::{Bytes, BytesMut};
 
     static TEST_KEY: &str = "
@@ -299,7 +310,8 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
 
         noise_mock.expect_start_transport().return_const(());
 
-        let _ = run_handshake(&mut noise_mock, true, initiator_reader, initiator_writer).await;
+        let _ = handshake::run_handshake(&mut noise_mock, true, initiator_reader, initiator_writer)
+            .await;
     }
 
     #[tokio::test]
@@ -321,6 +333,8 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
 
         noise_mock.expect_start_transport().return_const(());
 
-        let _ = run_handshake(&mut noise_mock, false, responder_reader, responder_writer).await;
+        let _ =
+            handshake::run_handshake(&mut noise_mock, false, responder_reader, responder_writer)
+                .await;
     }
 }
