@@ -28,6 +28,7 @@ mod noise_handler;
 mod protocol;
 mod reliable_sender;
 
+use crate::node::noise_handler::{NoiseHandler, NoiseIO};
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
 
@@ -99,8 +100,9 @@ impl Node {
             let (stream, socket_addr) = listener.accept().await.unwrap();
             log::info!("Accept connection from {}", socket_addr);
             let (reader, writer) = stream.into_split();
+            let noise = NoiseHandler::new(init, self.static_key_pem.clone());
             let (connection_handle, connection_receiver) =
-                ConnectionHandle::start(reader, writer, self.static_key_pem.clone(), init).await;
+                ConnectionHandle::start(reader, writer, noise, init).await;
             self.start_reliable_sender_receiver(connection_handle, connection_receiver, init)
                 .await;
         }
@@ -117,9 +119,9 @@ impl Node {
                 let peer_addr = stream.peer_addr().unwrap();
                 log::info!("Connected to {}", peer_addr);
                 let (reader, writer) = stream.into_split();
+                let noise = NoiseHandler::new(init, self.static_key_pem.clone());
                 let (connection_handle, connection_receiver) =
-                    ConnectionHandle::start(reader, writer, self.static_key_pem.clone(), init)
-                        .await;
+                    ConnectionHandle::start(reader, writer, noise, init).await;
                 self.start_reliable_sender_receiver(connection_handle, connection_receiver, init)
                     .await;
             } else {
