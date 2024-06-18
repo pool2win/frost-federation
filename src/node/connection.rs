@@ -60,17 +60,13 @@ where
     W: AsyncWrite + Unpin,
     N: NoiseIO,
 {
-    /// Build a new connection struct to work with the TcpStream
-    pub async fn start(
+    pub fn build_reader_writer(
         reader: R,
         writer: W,
-        mut noise: N,
-        receiver: mpsc::Receiver<ConnectionMessage>,
-        subscription_sender: mpsc::Sender<ReliableNetworkMessage>,
-        init: bool,
-    ) -> Self {
-        // Set up a length delimted codec
-
+    ) -> (
+        FramedRead<R, LengthDelimitedCodec>,
+        FramedWrite<W, LengthDelimitedCodec>,
+    ) {
         let framed_reader = LengthDelimitedCodec::builder()
             .length_field_offset(0)
             .length_field_length(2)
@@ -81,9 +77,21 @@ where
             .length_field_length(2)
             .length_adjustment(0)
             .new_write(writer);
+        (framed_reader, framed_writer)
+    }
 
-        let (framed_reader, framed_writer) =
-            run_handshake(&mut noise, init, framed_reader, framed_writer).await;
+    /// Build a new connection struct to work with the TcpStream
+    pub async fn start(
+        reader: R,
+        writer: W,
+        mut noise: N,
+        receiver: mpsc::Receiver<ConnectionMessage>,
+        subscription_sender: mpsc::Sender<ReliableNetworkMessage>,
+        init: bool,
+    ) -> Self {
+        // Set up a length delimted codec
+        let (mut framed_reader, mut framed_writer) = Self::build_reader_writer(reader, writer);
+        run_handshake(&mut noise, init, &mut framed_reader, &mut framed_writer).await;
         log::debug!("Noise transport started");
 
         ConnectionActor {
@@ -263,21 +271,21 @@ mod tests {
     use tokio_test::io::Builder;
     use tokio_util::bytes::Bytes;
 
-    // #[tokio::test]
-    // async fn it_should_start_connection() {
-    //     let async_reader = Builder::new().read(b"\x00\x00\x00\x04-> e").build();
-    //     let async_writer = Builder::new().write(b"\x00\x00\x00\x04-> e").build();
+    #[tokio::test]
+    async fn it_should_start_connection() {
+        let async_reader = Builder::new().read(b"1").build();
+        let async_writer = Builder::new().write(b"1").build();
 
-    //     let mut noise = MockNoiseIO::default();
-    //     noise
-    //         .expect_build_handshake_message()
-    //         .return_const(Bytes::from("-> e"));
-    //     noise
-    //         .expect_read_handshake_message()
-    //         .return_const(Bytes::from("-> e"));
-    //     let (_handle, mut _receiver) =
-    //         ConnectionHandle::start(async_reader, async_writer, noise, true).await;
-    // }
+        let mut noise = MockNoiseIO::default();
+        noise
+            .expect_build_handshake_message()
+            .return_const(Bytes::from("1"));
+        noise
+            .expect_read_handshake_message()
+            .return_const(Bytes::from("1"));
+        let (_handle, mut _receiver) =
+            ConnectionHandle::start(async_reader, async_writer, noise, true).await;
+    }
 
     // #[tokio::test]
     // async fn it_should_start_connection_and_send_receive_message() {
