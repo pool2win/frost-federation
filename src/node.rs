@@ -20,7 +20,11 @@ use self::{protocol::HandshakeMessage, reliable_sender::ReliableNetworkMessage};
 #[mockall_double::double]
 use connection::ConnectionHandle;
 use tokio::{
-    net::{TcpListener, TcpStream},
+    io::{AsyncRead, AsyncWrite},
+    net::{
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+        TcpListener, TcpStream,
+    },
     sync::mpsc::Receiver,
 };
 mod connection;
@@ -31,6 +35,7 @@ mod reliable_sender;
 use crate::node::noise_handler::{NoiseHandler, NoiseIO};
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
+use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 #[derive(Debug)]
 pub struct Node {
@@ -91,6 +96,27 @@ impl Node {
             .unwrap()
     }
 
+    pub fn build_reader_writer(
+        &self,
+        stream: TcpStream,
+    ) -> (
+        FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
+        FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
+    ) {
+        let (reader, writer) = stream.into_split();
+        let framed_reader = LengthDelimitedCodec::builder()
+            .length_field_offset(0)
+            .length_field_length(2)
+            .length_adjustment(0)
+            .new_read(reader);
+        let framed_writer = LengthDelimitedCodec::builder()
+            .length_field_offset(0)
+            .length_field_length(2)
+            .length_adjustment(0)
+            .new_write(writer);
+        (framed_reader, framed_writer)
+    }
+
     /// Start accepting connections
     pub async fn start_accept(&mut self, listener: TcpListener) {
         log::debug!("Start accepting...");
@@ -99,7 +125,7 @@ impl Node {
             log::debug!("Waiting on accept...");
             let (stream, socket_addr) = listener.accept().await.unwrap();
             log::info!("Accept connection from {}", socket_addr);
-            let (reader, writer) = stream.into_split();
+            let (reader, writer) = self.build_reader_writer(stream);
             let noise = NoiseHandler::new(init, self.static_key_pem.clone());
             let (connection_handle, connection_receiver) =
                 ConnectionHandle::start(reader, writer, noise, init).await;
@@ -118,7 +144,7 @@ impl Node {
             if let Ok(stream) = TcpStream::connect(seed).await {
                 let peer_addr = stream.peer_addr().unwrap();
                 log::info!("Connected to {}", peer_addr);
-                let (reader, writer) = stream.into_split();
+                let (reader, writer) = self.build_reader_writer(stream);
                 let noise = NoiseHandler::new(init, self.static_key_pem.clone());
                 let (connection_handle, connection_receiver) =
                     ConnectionHandle::start(reader, writer, noise, init).await;

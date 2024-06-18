@@ -19,15 +19,10 @@
 use super::noise_handler::NoiseIO;
 use super::{noise_handler::handshake::run_handshake, reliable_sender::ReliableNetworkMessage};
 use futures::sink::SinkExt; // Bring SinkExt in scope for access to `send` calls
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    sync::{mpsc, oneshot},
-};
+use std::marker::Send;
+use tokio::sync::{mpsc, oneshot};
 use tokio_stream::StreamExt; // Bring StreamExt in scope for access to `next` calls
-use tokio_util::{
-    bytes::Bytes,
-    codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
-};
+use tokio_util::bytes::{Bytes, BytesMut};
 
 type ConnectionError = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub(crate) type ConnectionResult<T> = std::result::Result<T, ConnectionError>;
@@ -47,8 +42,8 @@ pub enum ConnectionMessage {
 
 #[derive(Debug)]
 pub struct ConnectionActor<R, W, N> {
-    reader: FramedRead<R, LengthDelimitedCodec>,
-    writer: FramedWrite<W, LengthDelimitedCodec>,
+    reader: R,
+    writer: W,
     receiver: mpsc::Receiver<ConnectionMessage>,
     subscriber: mpsc::Sender<ReliableNetworkMessage>,
     noise: N,
@@ -56,47 +51,27 @@ pub struct ConnectionActor<R, W, N> {
 
 impl<R, W, N> ConnectionActor<R, W, N>
 where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
+    R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin + Send,
+    W: SinkExt<Bytes> + Unpin + Send,
     N: NoiseIO,
 {
-    pub fn build_reader_writer(
-        reader: R,
-        writer: W,
-    ) -> (
-        FramedRead<R, LengthDelimitedCodec>,
-        FramedWrite<W, LengthDelimitedCodec>,
-    ) {
-        let framed_reader = LengthDelimitedCodec::builder()
-            .length_field_offset(0)
-            .length_field_length(2)
-            .length_adjustment(0)
-            .new_read(reader);
-        let framed_writer = LengthDelimitedCodec::builder()
-            .length_field_offset(0)
-            .length_field_length(2)
-            .length_adjustment(0)
-            .new_write(writer);
-        (framed_reader, framed_writer)
-    }
-
-    /// Build a new connection struct to work with the TcpStream
+    /// Build a new connection struct to work with the TCP Stream
     pub async fn start(
-        reader: R,
-        writer: W,
+        mut reader: R,
+        mut writer: W,
         mut noise: N,
         receiver: mpsc::Receiver<ConnectionMessage>,
         subscription_sender: mpsc::Sender<ReliableNetworkMessage>,
         init: bool,
     ) -> Self {
         // Set up a length delimted codec
-        let (mut framed_reader, mut framed_writer) = Self::build_reader_writer(reader, writer);
-        run_handshake(&mut noise, init, &mut framed_reader, &mut framed_writer).await;
+
+        run_handshake(&mut noise, init, &mut reader, &mut writer).await;
         log::debug!("Noise transport started");
 
         ConnectionActor {
-            reader: framed_reader,
-            writer: framed_writer,
+            reader,
+            writer,
             receiver,
             subscriber: subscription_sender,
             noise,
@@ -129,7 +104,7 @@ where
                 match self.writer.send(data).await {
                     Err(_) => {
                         log::info!("Closing connection");
-                        let _ = self.writer.close().await;
+                        let _ = self.writer.close();
                         Err("Error writing to socket stream".into())
                     }
                     Ok(_) => {
@@ -148,7 +123,7 @@ where
         respond_to: ConnectionResultSender,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(data) = msg.as_bytes() {
-            self.writer.send(data).await?;
+            self.writer.send(data).await;
             match respond_to.send(Ok(())) {
                 Ok(_) => Ok(()),
                 Err(_) => {
@@ -174,9 +149,9 @@ where
 
 pub async fn run_connection_actor<R, W, N>(mut actor: ConnectionActor<R, W, N>)
 where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-    N: NoiseIO,
+    R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin + Send + 'static,
+    W: SinkExt<Bytes> + Unpin + Send + 'static,
+    N: NoiseIO + 'static,
 {
     loop {
         tokio::select! {
@@ -225,8 +200,8 @@ impl ConnectionHandle {
         init: bool,
     ) -> (Self, mpsc::Receiver<ReliableNetworkMessage>)
     where
-        R: AsyncRead + Unpin + Send + 'static,
-        W: AsyncWrite + Unpin + Send + 'static,
+        R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin + Send + 'static,
+        W: SinkExt<Bytes> + Unpin + Send + 'static,
         N: NoiseIO + Send + 'static,
     {
         let (sender, receiver) = mpsc::channel(32);
@@ -253,11 +228,12 @@ impl ConnectionHandle {
 }
 
 mockall::mock! {
-    pub ConnectionHandle {
+     pub ConnectionHandle {
         pub async fn start<R, W, N>(reader: R, writer: W, noise: N, init: bool) -> (Self, mpsc::Receiver<ReliableNetworkMessage>)
-        where R: AsyncRead + Unpin + Send + 'static,
-              W: AsyncWrite + Unpin + Send + 'static,
-              N: NoiseIO + Send + 'static;
+        where
+            R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin + Send + 'static,
+            W: SinkExt<Bytes> + Unpin + Send + 'static,
+            N: NoiseIO + Send + 'static;
         pub async fn send(&self, data: ReliableNetworkMessage) -> ConnectionResult<()>;
     }
 }
@@ -268,23 +244,24 @@ mod tests {
     // use crate::node::protocol::{PingMessage, ProtocolMessage};
     // use crate::node::reliable_sender::ReliableNetworkMessage;
     use crate::node::noise_handler::MockNoiseIO;
-    use tokio_test::io::Builder;
-    use tokio_util::bytes::Bytes;
+    use tokio_util::bytes::{Bytes, BytesMut};
 
     #[tokio::test]
     async fn it_should_start_connection() {
-        let async_reader = Builder::new().read(b"1").build();
-        let async_writer = Builder::new().write(b"1").build();
+        let read_buffer: Vec<Result<BytesMut, std::io::Error>> =
+            vec![Ok(BytesMut::from("m1")), Ok(BytesMut::from("m3"))];
+        let reader = futures::stream::iter(read_buffer);
+        let writer: Vec<Bytes> = vec![];
 
         let mut noise = MockNoiseIO::default();
         noise
             .expect_build_handshake_message()
-            .return_const(Bytes::from("1"));
+            .return_const(Bytes::from("-> e"));
         noise
             .expect_read_handshake_message()
-            .return_const(Bytes::from("1"));
-        let (_handle, mut _receiver) =
-            ConnectionHandle::start(async_reader, async_writer, noise, true).await;
+            .return_const(Bytes::from("-> e"));
+        noise.expect_start_transport().return_const(());
+        let (_handle, mut _receiver) = ConnectionHandle::start(reader, writer, noise, true).await;
     }
 
     // #[tokio::test]
