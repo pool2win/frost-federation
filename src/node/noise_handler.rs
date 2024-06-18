@@ -146,33 +146,28 @@ pub mod handshake {
         initiator: bool,
         reader: R,
         writer: W,
-    ) -> (R, W)
-    where
+    ) where
         R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
         W: SinkExt<Bytes> + Unpin,
     {
-        let (reader, writer) = if initiator {
+        if initiator {
             initiator_handshake(noise, reader, writer).await
         } else {
             responder_handshake(noise, reader, writer).await
         };
         noise.start_transport();
-        (reader, writer)
     }
 
     /// Run initiator handshake steps. The steps here depend on the
     /// Noise protocol being used
-    pub async fn initiator_handshake<R, W>(
-        noise: &mut impl NoiseIO,
-        mut reader: R,
-        mut writer: W,
-    ) -> (R, W)
+    pub async fn initiator_handshake<R, W>(noise: &mut impl NoiseIO, mut reader: R, mut writer: W)
     where
         R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
         W: SinkExt<Bytes> + Unpin,
     {
-        let m1 = noise.build_handshake_message(b"-> e");
+        let m1 = noise.build_handshake_message(b"1");
         log::debug!("m1 : {:?}", m1.clone());
+        println!("m1 : {:?}", m1.clone());
         let _ = writer.send(m1).await;
 
         let m2 = reader.next().await.unwrap().unwrap().freeze();
@@ -184,16 +179,11 @@ pub mod handshake {
         let _ = writer.send(m3).await;
 
         log::info!("Noise channel ready");
-        (reader, writer)
     }
 
     /// Run initiator handshake steps. The steps here depend on the
     /// Noise protocol being used
-    async fn responder_handshake<R, W>(
-        noise: &mut impl NoiseIO,
-        mut reader: R,
-        mut writer: W,
-    ) -> (R, W)
+    async fn responder_handshake<R, W>(noise: &mut impl NoiseIO, mut reader: R, mut writer: W)
     where
         R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
         W: SinkExt<Bytes> + Unpin,
@@ -211,7 +201,6 @@ pub mod handshake {
         let _ = noise.read_handshake_message(m3);
 
         log::info!("Noise channel ready");
-        (reader, writer)
     }
 }
 
