@@ -16,7 +16,9 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use self::{protocol::HandshakeMessage, reliable_sender::ReliableNetworkMessage};
+use self::{
+    membership::Membership, protocol::HandshakeMessage, reliable_sender::ReliableNetworkMessage,
+};
 #[mockall_double::double]
 use connection::ConnectionHandle;
 use tokio::{
@@ -26,7 +28,9 @@ use tokio::{
     },
     sync::mpsc::Receiver,
 };
+
 mod connection;
+mod membership;
 mod noise_handler;
 mod protocol;
 mod reliable_sender;
@@ -41,6 +45,7 @@ pub struct Node {
     pub bind_address: String,
     pub static_key_pem: String,
     pub delivery_timeout: u64,
+    pub membership: Membership,
 }
 
 impl Node {
@@ -51,6 +56,7 @@ impl Node {
             bind_address: "localhost".to_string(),
             static_key_pem: String::new(),
             delivery_timeout: 500,
+            membership: Membership::new(),
         }
     }
 
@@ -128,8 +134,14 @@ impl Node {
             let (connection_handle, connection_receiver) =
                 ConnectionHandle::start(reader, writer, noise, init).await;
             let reliable_sender_handle = self
-                .start_reliable_sender_receiver(connection_handle, connection_receiver)
+                .start_reliable_sender_receiver(
+                    connection_handle,
+                    connection_receiver,
+                    socket_addr.to_string(),
+                )
                 .await;
+            self.membership
+                .add_member(socket_addr.to_string(), reliable_sender_handle.clone());
             // Start the first protocol to start interaction between nodes
             protocol::start_protocol::<HandshakeMessage>(reliable_sender_handle).await;
         }
@@ -149,9 +161,15 @@ impl Node {
                 let noise = NoiseHandler::new(init, self.static_key_pem.clone());
                 let (connection_handle, connection_receiver) =
                     ConnectionHandle::start(reader, writer, noise, init).await;
-                let _reliable_sender_handle = self
-                    .start_reliable_sender_receiver(connection_handle, connection_receiver)
+                let reliable_sender_handle = self
+                    .start_reliable_sender_receiver(
+                        connection_handle,
+                        connection_receiver,
+                        peer_addr.to_string(),
+                    )
                     .await;
+                self.membership
+                    .add_member(peer_addr.to_string(), reliable_sender_handle);
             } else {
                 log::debug!("Failed to connect to seed {}", seed);
             }
@@ -159,9 +177,10 @@ impl Node {
     }
 
     pub async fn start_reliable_sender_receiver(
-        &mut self,
+        &self,
         connection_handle: ConnectionHandle,
         connection_receiver: Receiver<ReliableNetworkMessage>,
+        addr: String,
     ) -> ReliableSenderHandle {
         let (reliable_sender_handle, mut application_receiver) = ReliableSenderHandle::start(
             connection_handle,
@@ -170,6 +189,7 @@ impl Node {
         )
         .await;
         let cloned = reliable_sender_handle.clone();
+        let membership_handle = self.membership.clone();
         tokio::spawn(async move {
             while let Some(message) = application_receiver.recv().await {
                 log::debug!("Application message received {:?}", message);
@@ -187,6 +207,7 @@ impl Node {
                 }
             }
             log::debug!("Connection clean up");
+            membership_handle.remove_member(addr);
         });
         reliable_sender_handle
     }
