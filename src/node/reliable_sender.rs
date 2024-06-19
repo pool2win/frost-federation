@@ -221,12 +221,9 @@ impl ReliableSenderHandle {
             log::info!("Error sending message to actor. Shutting down. {}", e);
             return Err("Error sending message to actor.".into());
         }
-        if timeout(
-            Duration::from_millis(self.delivery_timeout.into()),
-            receiver,
-        )
-        .await
-        .is_err()
+        if timeout(Duration::from_millis(self.delivery_timeout), receiver)
+            .await
+            .is_err()
         {
             Err("Reliable send failed on time out".into())
         } else {
