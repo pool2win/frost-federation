@@ -97,7 +97,6 @@ where
                 match self.writer.send(data).await {
                     Err(_) => {
                         log::info!("Closing connection");
-                        let _ = self.writer.close();
                         Err("Error writing to socket stream".into())
                     }
                     Ok(_) => {
