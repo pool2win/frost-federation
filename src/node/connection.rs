@@ -219,7 +219,6 @@ mod tests {
     use crate::node::noise_handler::MockNoiseIO;
     use crate::node::protocol::{PingMessage, ProtocolMessage};
     use crate::node::reliable_sender::ReliableNetworkMessage;
-    use futures::StreamExt;
     use tokio_util::bytes::{Bytes, BytesMut};
 
     #[tokio::test]
