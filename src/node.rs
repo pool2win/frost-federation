@@ -36,7 +36,6 @@ use crate::node::noise_handler::{NoiseHandler, NoiseIO};
 use crate::node::reliable_sender::ReliableSenderHandle;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
-#[derive(Debug)]
 pub struct Node {
     pub seeds: Vec<String>,
     pub bind_address: String,
@@ -128,8 +127,11 @@ impl Node {
             let noise = NoiseHandler::new(init, self.static_key_pem.clone());
             let (connection_handle, connection_receiver) =
                 ConnectionHandle::start(reader, writer, noise, init).await;
-            self.start_reliable_sender_receiver(connection_handle, connection_receiver, init)
+            let reliable_sender_handle = self
+                .start_reliable_sender_receiver(connection_handle, connection_receiver)
                 .await;
+            // Start the first protocol to start interaction between nodes
+            protocol::start_protocol::<HandshakeMessage>(reliable_sender_handle).await;
         }
     }
 
@@ -147,7 +149,8 @@ impl Node {
                 let noise = NoiseHandler::new(init, self.static_key_pem.clone());
                 let (connection_handle, connection_receiver) =
                     ConnectionHandle::start(reader, writer, noise, init).await;
-                self.start_reliable_sender_receiver(connection_handle, connection_receiver, init)
+                let _reliable_sender_handle = self
+                    .start_reliable_sender_receiver(connection_handle, connection_receiver)
                     .await;
             } else {
                 log::debug!("Failed to connect to seed {}", seed);
@@ -159,8 +162,7 @@ impl Node {
         &mut self,
         connection_handle: ConnectionHandle,
         connection_receiver: Receiver<ReliableNetworkMessage>,
-        init: bool,
-    ) {
+    ) -> ReliableSenderHandle {
         let (reliable_sender_handle, mut application_receiver) = ReliableSenderHandle::start(
             connection_handle,
             connection_receiver,
@@ -186,9 +188,6 @@ impl Node {
             }
             log::debug!("Connection clean up");
         });
-        // Start the first protocol to start interaction between nodes
-        if init {
-            protocol::start_protocol::<HandshakeMessage>(reliable_sender_handle).await;
-        }
+        reliable_sender_handle
     }
 }
