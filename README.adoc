@@ -12,14 +12,10 @@ the data before generating a threshold signature.
 === Network Connectivity
 
 . A federation of nodes with point to point network connectivity.
-. All point to point connections are authenticate and confidential
-using Noise Protocol.
-. All point to point connections are reliable with no ordering
-guarantees.
-. Echo-broadcast between all nodes to satisfy the FROST broadcast
-channel requirements.
-. Clocks synchronised using ntp to satisfy partial synchrony
-requirements.
+. All point to point connections are authenticated and confidential using the Noise framework.
+. All point to point connections are reliable with no ordering guarantees.
+. Provide an echo-broadcast implementation between all nodes to satisfy the FROST broadcast channel requirements.
+. Clocks are synchronised using ntp to satisfy partial synchrony requirements.
 
 === Round Time
 
@@ -29,23 +25,18 @@ a network of size 100 nodes, and then adjust this as required]
 
 == Federation Clients
 
-. Clients connect to any node in the federation and send data and
-commands to any node in the federation.
-. The federation synchronises data and commands received from
-clients.
+. Clients connect to any node in the federation and then send data/commands to that node.
+. The federation members synchronise data and commands received from clients.
 
 == Threshold Signatures
 
-. The federation runs preprocessing DKG rounds every fixed interval
-. On client requests or on the need from within the federation, a
-threshold signature is generated for the provided message.
+. The federation runs preprocessing DKG rounds every fixed interval.
+. Threshold signatures are generated Whenever a client requests a one or the federation needs one.
 
 === Validate Before Signing
 
-. The federation is provided a validation protocol it runs on the
-synchronised data, before it generates a threshold signature.
-. This allows clients to use the federation as a BFT validation and
-signature generation service
+. The federation is provided a validation protocol it runs on the synchronised data, before it generates a threshold signature.
+. This allows clients to use the federation as a BFT validation and signature generation service.
 
 == Build Status
 
