@@ -34,10 +34,6 @@ pub enum ConnectionMessage {
         data: ReliableNetworkMessage,
         respond_to: ConnectionResultSender,
     },
-    SendClearText {
-        data: ReliableNetworkMessage,
-        respond_to: ConnectionResultSender,
-    },
 }
 
 #[derive(Debug)]
@@ -86,9 +82,6 @@ where
             ConnectionMessage::Send { data, respond_to } => {
                 self.handle_send(data, respond_to).await
             }
-            ConnectionMessage::SendClearText { data, respond_to } => {
-                self.handle_send_clear_text(data, respond_to).await
-            }
         }
     }
 
@@ -114,24 +107,6 @@ where
                 }
             }
             None => Err("Error serializing message".into()),
-        }
-    }
-
-    pub async fn handle_send_clear_text(
-        &mut self,
-        msg: ReliableNetworkMessage,
-        respond_to: ConnectionResultSender,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(data) = msg.as_bytes() {
-            self.writer.send(data).await;
-            match respond_to.send(Ok(())) {
-                Ok(_) => Ok(()),
-                Err(_) => {
-                    Err("Unable to write to client sending clear text. Client went away?".into())
-                }
-            }
-        } else {
-            Err("Error serializing message".into())
         }
     }
 
