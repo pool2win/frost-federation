@@ -241,9 +241,10 @@ mockall::mock! {
 #[cfg(test)]
 mod tests {
     use super::ConnectionHandle;
-    // use crate::node::protocol::{PingMessage, ProtocolMessage};
-    // use crate::node::reliable_sender::ReliableNetworkMessage;
     use crate::node::noise_handler::MockNoiseIO;
+    use crate::node::protocol::{PingMessage, ProtocolMessage};
+    use crate::node::reliable_sender::ReliableNetworkMessage;
+    use futures::StreamExt;
     use tokio_util::bytes::{Bytes, BytesMut};
 
     #[tokio::test]
@@ -264,21 +265,38 @@ mod tests {
         let (_handle, mut _receiver) = ConnectionHandle::start(reader, writer, noise, true).await;
     }
 
-    // #[tokio::test]
-    // async fn it_should_start_connection_and_send_receive_message() {
-    //     let async_reader = Builder::new().read(b"hello world").build();
-    //     let async_writer = Builder::new().write(b"hello world").build();
+    #[tokio::test]
+    async fn it_should_start_connection_and_send_message() {
+        let read_buffer: Vec<Result<BytesMut, std::io::Error>> =
+            vec![Ok(BytesMut::from("m1")), Ok(BytesMut::from("m3"))];
+        let reader = futures::stream::iter(read_buffer);
+        let writer: Vec<Bytes> = vec![];
 
-    //     let (handle, mut receiver) =
-    //         ConnectionHandle::start(async_reader, async_writer, "test key".to_string(), true).await;
+        let mut noise = MockNoiseIO::default();
+        noise
+            .expect_build_handshake_message()
+            .return_const(Bytes::from("-> e"));
+        noise
+            .expect_read_handshake_message()
+            .return_const(Bytes::from("-> e"));
+        noise.expect_start_transport().return_const(());
+        let msg = ReliableNetworkMessage::Send(PingMessage::start().unwrap(), 1);
+        noise
+            .expect_build_transport_message()
+            .return_const(msg.as_bytes().unwrap());
+        noise.expect_read_transport_message().returning(|_| {
+            ReliableNetworkMessage::Send(PingMessage::start().unwrap(), 2)
+                .as_bytes()
+                .unwrap()
+        });
 
-    //     let msg = ReliableNetworkMessage::Send(PingMessage::start().unwrap(), 1);
-    //     let _ = handle.send(msg).await;
+        let (handle, mut receiver) = ConnectionHandle::start(reader, writer, noise, true).await;
+        let _ = handle.send(msg).await;
 
-    //     let received_msg = receiver.recv().await.unwrap();
-    //     assert_eq!(
-    //         received_msg,
-    //         ReliableNetworkMessage::Send(PingMessage::start().unwrap(), 2)
-    //     );
-    // }
+        let received_msg = receiver.recv().await.unwrap();
+        assert_eq!(
+            received_msg,
+            ReliableNetworkMessage::Send(PingMessage::start().unwrap(), 2)
+        );
+    }
 }

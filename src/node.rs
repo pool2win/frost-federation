@@ -20,7 +20,6 @@ use self::{protocol::HandshakeMessage, reliable_sender::ReliableNetworkMessage};
 #[mockall_double::double]
 use connection::ConnectionHandle;
 use tokio::{
-    io::{AsyncRead, AsyncWrite},
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpListener, TcpStream,
