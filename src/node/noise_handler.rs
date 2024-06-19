@@ -167,7 +167,6 @@ pub mod handshake {
     {
         let m1 = noise.build_handshake_message(b"1");
         log::debug!("m1 : {:?}", m1.clone());
-        println!("m1 : {:?}", m1.clone());
         let _ = writer.send(m1).await;
 
         let m2 = reader.next().await.unwrap().unwrap().freeze();
