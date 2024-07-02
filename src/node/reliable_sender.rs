@@ -16,10 +16,11 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use super::protocol::Message;
 #[mockall_double::double]
 use crate::node::connection::ConnectionHandle;
 use crate::node::connection::{ConnectionResult, ConnectionResultSender};
+use crate::node::membership::Membership;
+use crate::node::protocol::Message;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::{collections::HashMap, time::Duration};

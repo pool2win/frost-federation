@@ -19,6 +19,9 @@
 use self::{
     membership::Membership, protocol::HandshakeMessage, reliable_sender::ReliableNetworkMessage,
 };
+use crate::node::noise_handler::{NoiseHandler, NoiseIO};
+#[mockall_double::double]
+use crate::node::reliable_sender::ReliableSenderHandle;
 #[mockall_double::double]
 use connection::ConnectionHandle;
 use tokio::{
@@ -28,17 +31,13 @@ use tokio::{
     },
     sync::mpsc::Receiver,
 };
+use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 mod connection;
 mod membership;
 mod noise_handler;
 mod protocol;
 mod reliable_sender;
-
-use crate::node::noise_handler::{NoiseHandler, NoiseIO};
-#[mockall_double::double]
-use crate::node::reliable_sender::ReliableSenderHandle;
-use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 pub struct Node {
     pub seeds: Vec<String>,
