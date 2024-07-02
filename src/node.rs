@@ -185,6 +185,7 @@ impl Node {
             connection_handle,
             connection_receiver,
             self.delivery_timeout,
+            self.membership.clone(),
         )
         .await;
         let cloned = reliable_sender_handle.clone();
