@@ -40,6 +40,8 @@ enum ReliableMessage {
 pub enum ReliableNetworkMessage {
     Send(Message, u64),
     Ack(u64),
+    Broadcast(Message, u64),
+    Echo(Message, u64),
 }
 
 /// Methods for all protocol messages
@@ -110,6 +112,10 @@ impl ReliableSenderActor {
         }
     }
 
+    /// Handle a message received from the network.
+    /// If it is a Send type, send an Ack back
+    /// If it is an Ack, then remove the acked message from waiting_for_ack
+    /// If it is a Broadcast, then send an echo broadcast message to all current members
     async fn handle_connection_message(
         &mut self,
         msg: ReliableNetworkMessage,
@@ -142,6 +148,13 @@ impl ReliableSenderActor {
                         log::debug!("No message waiting for the ACK received");
                     }
                 }
+            }
+            ReliableNetworkMessage::Broadcast(message, sequence_number) => {
+                // let current_members = self.membership_handle
+                // [TODO: echo-broadcast] - Send echo back to all current members
+            }
+            ReliableNetworkMessage::Echo(message, sequence_number) => {
+                // [TODO: echo-broadcast] - Send echo back to all current members
             }
         }
         Ok(())
