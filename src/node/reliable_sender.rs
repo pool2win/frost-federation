@@ -19,10 +19,11 @@
 #[mockall_double::double]
 use crate::node::connection::ConnectionHandle;
 use crate::node::connection::{ConnectionResult, ConnectionResultSender};
-use crate::node::membership::Membership;
+use crate::node::membership::MembershipHandle;
 use crate::node::protocol::Message;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
+use std::fmt::Debug;
 use std::{collections::HashMap, time::Duration};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
@@ -68,7 +69,7 @@ struct ReliableSenderActor {
     sequence_number: u64,
     connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
     application_sender: mpsc::Sender<Message>,
-    membership_handle: Membership,
+    membership_handle: MembershipHandle,
 }
 
 impl ReliableSenderActor {
@@ -77,7 +78,7 @@ impl ReliableSenderActor {
         connection_handle: ConnectionHandle,
         connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
         application_sender: mpsc::Sender<Message>,
-        membership_handle: Membership,
+        membership_handle: MembershipHandle,
     ) -> Self {
         ReliableSenderActor {
             receiver,
@@ -185,18 +186,19 @@ async fn start_reliable_sender(mut actor: ReliableSenderActor) {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct ReliableSenderHandle {
     sender: mpsc::Sender<ReliableMessage>,
     delivery_timeout: u64,
 }
 
 mockall::mock! {
+    #[derive(Debug)]
     pub ReliableSenderHandle {
         pub async fn start(connection_handle: ConnectionHandle,
                            connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
                            delivery_timeout: u64,
-                           membership_handle: Membership) ->
+                           membership_handle: MembershipHandle) ->
             (Self, mpsc::Receiver<Message>);
         pub async fn send(&self, message: Message) -> ConnectionResult<()>;
     }
@@ -210,7 +212,7 @@ impl ReliableSenderHandle {
         connection_handle: ConnectionHandle,
         connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
         delivery_timeout: u64,
-        membership_handle: Membership,
+        membership_handle: MembershipHandle,
     ) -> (Self, mpsc::Receiver<Message>) {
         let (sender, receiver) = mpsc::channel(32);
         let (application_sender, application_receiver) = mpsc::channel(32);
@@ -258,7 +260,7 @@ impl ReliableSenderHandle {
 mod tests {
     use super::ReliableNetworkMessage;
     use crate::node::connection::MockConnectionHandle;
-    use crate::node::membership::Membership;
+    use crate::node::membership::MembershipHandle;
     use crate::node::protocol::{Message, PingMessage, ProtocolMessage};
     use serde::Serialize;
     use tokio::sync::mpsc;
@@ -299,7 +301,7 @@ mod tests {
     #[tokio::test]
     async fn it_should_successfully_send_message_to_actor_and_receieve_an_ack() {
         let (connection_sender, connection_receiver) = mpsc::channel(32);
-        let membership_handle = Membership::new();
+        let membership_handle = MembershipHandle::start().await;
         let mut mock_connection_handle = MockConnectionHandle::default();
         mock_connection_handle.expect_send().return_once(|_| Ok(()));
 
@@ -326,7 +328,7 @@ mod tests {
     #[tokio::test]
     async fn it_should_successfully_send_message_to_actor_timeout_if_no_ack_received() {
         let (_connection_sender, connection_receiver) = mpsc::channel(32);
-        let membership_handle = Membership::new();
+        let membership_handle = MembershipHandle::start().await;
         let mut mock_connection_handle = MockConnectionHandle::default();
         mock_connection_handle.expect_send().return_once(|_| Ok(()));
 
@@ -347,7 +349,7 @@ mod tests {
     #[tokio::test]
     async fn it_should_successfully_send_ack_when_message_received() {
         let (connection_sender, connection_receiver) = mpsc::channel(32);
-        let membership_handle = Membership::new();
+        let membership_handle = MembershipHandle::start().await;
         let mut mock_connection_handle = MockConnectionHandle::default();
         mock_connection_handle.expect_send().return_once(|_| Ok(()));
 
@@ -371,7 +373,7 @@ mod tests {
     #[tokio::test]
     async fn it_should_handle_error_on_message_received() {
         let (connection_sender, connection_receiver) = mpsc::channel(32);
-        let membership_handle = Membership::new();
+        let membership_handle = MembershipHandle::start().await;
         let mut mock_connection_handle = MockConnectionHandle::default();
         mock_connection_handle
             .expect_send()

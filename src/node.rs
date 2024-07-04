@@ -17,7 +17,8 @@
 // <https://www.gnu.org/licenses/>.
 
 use self::{
-    membership::Membership, protocol::HandshakeMessage, reliable_sender::ReliableNetworkMessage,
+    membership::MembershipHandle, protocol::HandshakeMessage,
+    reliable_sender::ReliableNetworkMessage,
 };
 use crate::node::noise_handler::{NoiseHandler, NoiseIO};
 #[mockall_double::double]
@@ -44,18 +45,18 @@ pub struct Node {
     pub bind_address: String,
     pub static_key_pem: String,
     pub delivery_timeout: u64,
-    pub membership: Membership,
+    pub membership: MembershipHandle,
 }
 
 impl Node {
     /// Use builder pattern
-    pub fn new() -> Self {
+    pub async fn new() -> Self {
         Node {
             seeds: vec!["localhost:6680".to_string()],
             bind_address: "localhost".to_string(),
             static_key_pem: String::new(),
             delivery_timeout: 500,
-            membership: Membership::new(),
+            membership: MembershipHandle::start().await,
         }
     }
 

@@ -42,6 +42,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let _listen_broadcast_sender = send_to_all_tx.clone();
 
     let mut node = node::Node::new()
+        .await
         .seeds(config.peer.seeds)
         .bind_address(bind_address)
         .static_key_pem(config.noise.key)
