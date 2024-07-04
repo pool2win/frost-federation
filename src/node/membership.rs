@@ -16,29 +16,107 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
+use crate::node::protocol::Message;
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use tokio::sync::{mpsc, oneshot};
 
-#[derive(Clone)]
-pub struct Membership {
-    members: Arc<Mutex<HashMap<String, ReliableSenderHandle>>>,
+pub enum MembershipMessage {
+    Add(String, ReliableSenderHandle, oneshot::Sender<()>),
+    Remove(String, oneshot::Sender<Option<ReliableSenderHandle>>),
+    Broadcast(Message, oneshot::Sender<()>),
 }
 
-impl Membership {
-    pub fn new() -> Self {
+#[derive(Debug)]
+pub(crate) struct MembershipActor {
+    members: HashMap<String, ReliableSenderHandle>,
+    receiver: mpsc::Receiver<MembershipMessage>,
+}
+
+impl MembershipActor {
+    pub fn start(receiver: mpsc::Receiver<MembershipMessage>) -> Self {
         Self {
-            members: Arc::new(Mutex::new(HashMap::default())),
+            members: HashMap::default(),
+            receiver,
         }
     }
 
-    pub fn add_member(&self, addr: String, handle: ReliableSenderHandle) {
-        self.members.lock().unwrap().insert(addr, handle);
+    pub fn add_member(
+        &mut self,
+        addr: String,
+        handle: ReliableSenderHandle,
+        respond_to: oneshot::Sender<()>,
+    ) {
+        self.members.insert(addr, handle);
+        let _ = respond_to.send(());
     }
 
-    pub fn remove_member(&self, addr: String) {
-        self.members.lock().unwrap().remove(&addr);
+    pub fn remove_member(
+        &mut self,
+        addr: String,
+        respond_to: oneshot::Sender<Option<ReliableSenderHandle>>,
+    ) {
+        let removed = self.members.remove(&addr);
+        let _ = respond_to.send(removed);
+    }
+
+    pub fn send_broadcast(&mut self, message: Message, respond_to: oneshot::Sender<()>) {
+        let _ = respond_to.send(());
+    }
+}
+
+pub async fn run_membership_actor(mut actor: MembershipActor) {
+    while let Some(message) = actor.receiver.recv().await {
+        match message {
+            MembershipMessage::Add(addr, handle, respond_to) => {
+                actor.add_member(addr, handle, respond_to)
+            }
+            MembershipMessage::Remove(addr, respond_to) => actor.remove_member(addr, respond_to),
+            MembershipMessage::Broadcast(message, respond_to) => {
+                actor.send_broadcast(message, respond_to)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct MembershipHandle {
+    sender: mpsc::Sender<MembershipMessage>,
+}
+
+impl MembershipHandle {
+    pub async fn start() -> Self {
+        let (sender, receiver) = mpsc::channel(32);
+        let actor = MembershipActor::start(receiver);
+        tokio::spawn(run_membership_actor(actor));
+        Self { sender }
+    }
+
+    pub async fn add_member(
+        &self,
+        member: String,
+        handle: ReliableSenderHandle,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let (respond_to, receiver) = oneshot::channel();
+        let msg = MembershipMessage::Add(member, handle, respond_to);
+        let _ = self.sender.send(msg).await;
+        match receiver.await {
+            Err(_) => Err("Error adding member".into()),
+            Ok(_) => Ok(()),
+        }
+    }
+
+    pub async fn remove_member(&self, member: String) -> Result<(), Box<dyn std::error::Error>> {
+        let (respond_to, receiver) = oneshot::channel();
+        let msg = MembershipMessage::Remove(member, respond_to);
+        let _ = self.sender.send(msg).await;
+        let response = receiver.await.unwrap();
+        if response.is_some() {
+            Ok(())
+        } else {
+            Err("Error removing member".into())
+        }
     }
 }
 
@@ -48,14 +126,31 @@ mod tests {
 
     #[tokio::test]
     async fn it_should_create_membership_add_and_remove_members() {
-        let membership = Membership::new();
+        let membership_handle = MembershipHandle::start().await;
         let reliable_sender_handle = ReliableSenderHandle::default();
         let reliable_sender_handle_2 = ReliableSenderHandle::default();
 
-        membership.add_member("localhost".to_string(), reliable_sender_handle);
+        let _ = membership_handle
+            .add_member("localhost".to_string(), reliable_sender_handle)
+            .await;
 
-        membership.add_member("localhost2".to_string(), reliable_sender_handle_2);
+        let _ = membership_handle
+            .add_member("localhost2".to_string(), reliable_sender_handle_2)
+            .await;
 
-        membership.remove_member("localhost".to_string());
+        assert!(membership_handle
+            .remove_member("localhost".to_string())
+            .await
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn it_should_result_in_error_when_removing_non_member() {
+        let membership_handle = MembershipHandle::start().await;
+
+        assert!(membership_handle
+            .remove_member("localhost22".to_string())
+            .await
+            .is_err());
     }
 }
