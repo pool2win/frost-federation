@@ -20,11 +20,13 @@ use crate::node::protocol::Message;
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
 use std::collections::HashMap;
+use std::error::Error;
 use tokio::sync::{mpsc, oneshot};
 
 pub enum MembershipMessage {
     Add(String, ReliableSenderHandle, oneshot::Sender<()>),
     Remove(String, oneshot::Sender<Option<ReliableSenderHandle>>),
+    GetSenders(oneshot::Sender<Vec<ReliableSenderHandle>>),
     Broadcast(Message, oneshot::Sender<()>),
 }
 
@@ -61,6 +63,11 @@ impl MembershipActor {
         let _ = respond_to.send(removed);
     }
 
+    pub fn get_senders(&self, respond_to: oneshot::Sender<Vec<ReliableSenderHandle>>) {
+        let m: Vec<ReliableSenderHandle> = self.members.values().cloned().collect();
+        let _ = respond_to.send(m);
+    }
+
     pub fn send_broadcast(&mut self, message: Message, respond_to: oneshot::Sender<()>) {
         let _ = respond_to.send(());
     }
@@ -76,6 +83,7 @@ pub async fn run_membership_actor(mut actor: MembershipActor) {
             MembershipMessage::Broadcast(message, respond_to) => {
                 actor.send_broadcast(message, respond_to)
             }
+            MembershipMessage::GetSenders(respond_to) => actor.get_senders(respond_to),
         }
     }
 }
@@ -118,6 +126,22 @@ impl MembershipHandle {
             Err("Error removing member".into())
         }
     }
+
+    pub async fn get_senders(&self) -> Result<Vec<ReliableSenderHandle>, Box<dyn Error>> {
+        let (respond_to, receiver) = oneshot::channel();
+        if self
+            .sender
+            .send(MembershipMessage::GetSenders(respond_to))
+            .await
+            .is_err()
+        {
+            return Err("Error sending request to get reliable senders".into());
+        }
+        match receiver.await {
+            Err(_) => Err("Error reading membership".into()),
+            Ok(result) => Ok(result),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -152,5 +176,28 @@ mod tests {
             .remove_member("localhost22".to_string())
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn it_should_return_members_as_empty_vec() {
+        let membership_handle = MembershipHandle::start().await;
+
+        let reliable_senders = membership_handle.get_senders().await;
+        assert!(reliable_senders.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn it_should_return_members_as_vec() {
+        let membership_handle = MembershipHandle::start().await;
+        let mut reliable_sender_handle = ReliableSenderHandle::default();
+        reliable_sender_handle
+            .expect_clone()
+            .returning(ReliableSenderHandle::default);
+        let _ = membership_handle
+            .add_member("localhost".to_string(), reliable_sender_handle)
+            .await;
+
+        let reliable_senders = membership_handle.get_senders().await;
+        assert_eq!(reliable_senders.unwrap().len(), 1);
     }
 }
