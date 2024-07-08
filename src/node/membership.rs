@@ -68,8 +68,13 @@ impl MembershipActor {
         let _ = respond_to.send(m);
     }
 
-    pub fn send_broadcast(&mut self, message: Message, respond_to: oneshot::Sender<()>) {
-        let _ = respond_to.send(());
+    /// Send an Echo Broadcast message
+    /// Use the reliable senders in the member's variable, then hand
+    /// on further processing to EchoBroadcast
+    pub async fn send_broadcast(&mut self, message: Message, respond_to: oneshot::Sender<()>) {
+        for reliable_sender in self.members.values() {
+            reliable_sender.send(message.clone()).await;
+        }
     }
 }
 

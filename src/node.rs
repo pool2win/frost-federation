@@ -35,6 +35,7 @@ use tokio::{
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 mod connection;
+mod echo_broadcast;
 mod membership;
 mod noise_handler;
 mod protocol;
