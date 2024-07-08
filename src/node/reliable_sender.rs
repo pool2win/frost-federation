@@ -249,6 +249,7 @@ impl ReliableSenderHandle {
             .await
             .is_err()
         {
+            // TODO: Remove this message from waiting_for_ack. This detail should stay in the actor.
             Err("Reliable send failed on time out".into())
         } else {
             Ok(())
