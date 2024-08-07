@@ -85,6 +85,14 @@ impl Node {
         node
     }
 
+    /// Get the node id for self.
+    ///
+    /// Right now return the bind address. This will be later changed
+    /// to using the public key the node uses as an identifier.
+    pub fn get_node_id(&self) -> String {
+        self.bind_address.clone()
+    }
+
     /// Start node by listening, accepting and connecting to peers
     pub async fn start(&mut self) {
         log::debug!("Starting...");
@@ -150,12 +158,9 @@ impl Node {
                 log::debug!("Error adding new connection to membership. Stopping.");
                 return;
             }
+            let node_id = self.get_node_id();
             // Start the first protocol to start interaction between nodes
-            protocol::start_protocol::<HandshakeMessage>(
-                reliable_sender_handle,
-                &self.bind_address,
-            )
-            .await;
+            protocol::start_protocol::<HandshakeMessage>(reliable_sender_handle, &node_id).await;
         }
     }
 
@@ -209,7 +214,8 @@ impl Node {
         .await;
         let cloned = reliable_sender_handle.clone();
         let membership_handle = self.membership.clone();
-        let node_id = self.bind_address.clone();
+
+        let node_id = self.get_node_id();
         tokio::spawn(async move {
             while let Some(message) = application_receiver.recv().await {
                 log::debug!("Application message received {:?}", message);
@@ -230,5 +236,16 @@ impl Node {
             let _ = membership_handle.remove_member(addr).await;
         });
         reliable_sender_handle
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Node;
+
+    #[tokio::test]
+    async fn it_should_return_well_formed_node_id() {
+        let node = Node::new().await;
+        assert_eq!(node.get_node_id(), "localhost");
     }
 }
