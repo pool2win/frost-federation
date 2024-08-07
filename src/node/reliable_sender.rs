@@ -118,7 +118,7 @@ impl ReliableSenderActor {
 
     /// Handle a message received from the network.
     /// If it is a Send type, send an Ack back
-    /// If it is an Ack, then remove the acked message from waiting_for_ack
+    /// If it is an Ack, then remove the acked message from waiting_for_ack and return Ok() to application waiting
     /// If it is a Broadcast, then send an echo broadcast message to all current members
     async fn handle_connection_message(
         &mut self,
@@ -235,19 +235,24 @@ impl ReliableSenderHandle {
         )
     }
 
+    /// Send a message reliably.
+    /// On timeout in trying to wait for message reliable delivery, return an error.
     pub async fn send(&self, message: Message) -> ConnectionResult<()> {
-        let (sender, receiver) = oneshot::channel();
+        let (sender_from_actor, receiver_from_actor) = oneshot::channel();
         let msg = ReliableMessage::Send {
             message,
-            respond_to: sender,
+            respond_to: sender_from_actor,
         };
         if let Err(e) = self.sender.send(msg).await {
             log::info!("Error sending message to actor. Shutting down. {}", e);
             return Err("Error sending message to actor.".into());
         }
-        if timeout(Duration::from_millis(self.delivery_timeout), receiver)
-            .await
-            .is_err()
+        if timeout(
+            Duration::from_millis(self.delivery_timeout),
+            receiver_from_actor,
+        )
+        .await
+        .is_err()
         {
             // TODO: Remove this message from waiting_for_ack. This detail should stay in the actor.
             Err("Reliable send failed on time out".into())
@@ -302,7 +307,7 @@ mod tests {
     #[tokio::test]
     async fn it_should_successfully_send_message_to_actor_and_receieve_an_ack() {
         let (connection_sender, connection_receiver) = mpsc::channel(32);
-        let membership_handle = MembershipHandle::start().await;
+        let membership_handle = MembershipHandle::start(500).await;
         let mut mock_connection_handle = MockConnectionHandle::default();
         mock_connection_handle.expect_send().return_once(|_| Ok(()));
 
@@ -329,7 +334,7 @@ mod tests {
     #[tokio::test]
     async fn it_should_successfully_send_message_to_actor_timeout_if_no_ack_received() {
         let (_connection_sender, connection_receiver) = mpsc::channel(32);
-        let membership_handle = MembershipHandle::start().await;
+        let membership_handle = MembershipHandle::start(500).await;
         let mut mock_connection_handle = MockConnectionHandle::default();
         mock_connection_handle.expect_send().return_once(|_| Ok(()));
 
@@ -350,7 +355,7 @@ mod tests {
     #[tokio::test]
     async fn it_should_successfully_send_ack_when_message_received() {
         let (connection_sender, connection_receiver) = mpsc::channel(32);
-        let membership_handle = MembershipHandle::start().await;
+        let membership_handle = MembershipHandle::start(500).await;
         let mut mock_connection_handle = MockConnectionHandle::default();
         mock_connection_handle.expect_send().return_once(|_| Ok(()));
 
@@ -374,7 +379,7 @@ mod tests {
     #[tokio::test]
     async fn it_should_handle_error_on_message_received() {
         let (connection_sender, connection_receiver) = mpsc::channel(32);
-        let membership_handle = MembershipHandle::start().await;
+        let membership_handle = MembershipHandle::start(500).await;
         let mut mock_connection_handle = MockConnectionHandle::default();
         mock_connection_handle
             .expect_send()

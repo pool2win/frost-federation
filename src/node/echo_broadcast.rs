@@ -16,64 +16,101 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use crate::node::membership::MembershipHandle;
 use crate::node::protocol::Message;
+#[mockall_double::double]
+use crate::node::reliable_sender::ReliableSenderHandle;
+use std::collections::HashMap;
 use std::error::Error;
-use tokio::sync::mpsc;
+use std::time::Duration;
+use tokio::sync::{mpsc, oneshot};
+use tokio::time::timeout;
+
+use super::connection::ConnectionResultSender;
 
 /// Message types for echo broadcast actor -> handle communication
 pub(crate) enum EchoBroadcastMessage {
-    Send(Message),
-    Echo(Message),
+    Send {
+        data: Message,
+        respond_to: ConnectionResultSender,
+    },
+    Echo {
+        data: Message,
+        respond_to: ConnectionResultSender,
+    },
 }
 
 /// Echo Broadcast Actor model implementation.
 /// The actor receives messages from EchoBroadcastHandle
 pub(crate) struct EchoBroadcastActor {
+    reliable_sender: ReliableSenderHandle,
     receiver: mpsc::Receiver<EchoBroadcastMessage>,
-    membership_handle: MembershipHandle,
+    echos: HashMap<String, bool>,
 }
 
 impl EchoBroadcastActor {
     pub fn start(
+        reliable_sender: ReliableSenderHandle,
         receiver: mpsc::Receiver<EchoBroadcastMessage>,
-        membership_handle: MembershipHandle,
+        members: Vec<String>,
     ) -> Self {
+        let mut echos = HashMap::<String, bool>::new();
+        for member in members {
+            echos.insert(member, false);
+        }
         Self {
+            reliable_sender,
             receiver,
-            membership_handle,
+            echos,
         }
     }
 
     pub async fn handle_message(&mut self, message: EchoBroadcastMessage) {
         match message {
-            EchoBroadcastMessage::Send(message) => {
-                // TODO: Send using reliable sender
-                self.send_message(message).await;
-                // TODO: Book keeping for waiting for echo
+            EchoBroadcastMessage::Send { data, respond_to } => {
+                // TODO: Start book keeping for waiting for echo
+                // Send message once book keeping has started
+                let _ = self.send_message(data, respond_to).await;
             }
-            EchoBroadcastMessage::Echo(message) => {
+            EchoBroadcastMessage::Echo { data, respond_to } => {
                 // TODO: Update waiting for echo
-                self.handle_received_echo(message).await;
+                self.handle_received_echo(data, respond_to).await;
             }
         }
     }
 
-    /// Send message using the reliable sender
-    /// Return the result from the reliable sender's send method
+    /// Receives messages to echo broadcast, wait for echo messages
+    /// from all members, on timeout, return an error to waiting
+    /// receiver.
+    ///
+    /// Process:
+    /// 1. Wait for echos from all members for the message sent
+    /// 2. On timeout return error
+    /// 3. On receiving echos from all members, return Ok() to waiting receiver
+
     pub async fn send_message(
         &mut self,
-        message: Message,
+        data: Message,
+        respond_to: ConnectionResultSender,
     ) -> Result<(), Box<dyn Error + Sync + Send>> {
-        //self.reliable_sender.send(message).await
+        let _ = self.reliable_sender.send(data).await;
+        // self.echos[data.sender] = true;
         Ok(())
     }
 
-    pub async fn handle_received_echo(&mut self, message: Message) {}
+    pub async fn handle_received_echo(
+        &mut self,
+        data: Message,
+        respond_to: ConnectionResultSender,
+    ) {
+    }
 }
 
 /// Handler for sending and confirming echo messages for a broadcast
 /// Send using ReliableSenderHandle and then wait fro Echo message
+///
+/// Members list is copied into this struct so that we are only
+/// waiting for echos from the parties that were members when the
+/// broadcast was originally sent.
 #[derive(Clone, Debug)]
 pub(crate) struct EchoBroadcastHandle {
     sender: mpsc::Sender<EchoBroadcastMessage>,
@@ -86,10 +123,15 @@ async fn start_echo_broadcast(mut actor: EchoBroadcastActor) {
     }
 }
 
+/// Handle for the echo broadcast actor
 impl EchoBroadcastHandle {
-    pub fn start(delivery_timeout: u64, membership_handle: MembershipHandle) -> Self {
+    pub fn start(
+        reliable_sender: ReliableSenderHandle,
+        delivery_timeout: u64,
+        members: Vec<String>,
+    ) -> Self {
         let (sender, receiver) = mpsc::channel(32);
-        let actor = EchoBroadcastActor::start(receiver, membership_handle);
+        let actor = EchoBroadcastActor::start(reliable_sender, receiver, members);
         tokio::spawn(start_echo_broadcast(actor));
 
         Self {
@@ -99,11 +141,41 @@ impl EchoBroadcastHandle {
     }
 
     pub async fn send_broadcast(&self, message: Message) -> Result<(), Box<dyn Error>> {
-        let msg = EchoBroadcastMessage::Send(message);
-        if self.sender.send(msg).await.is_err() {
-            Err("Error sending broadcast message".into())
+        let (sender_from_actor, receiver_from_actor) = oneshot::channel();
+        let msg = EchoBroadcastMessage::Send {
+            data: message,
+            respond_to: sender_from_actor,
+        };
+        self.sender.send(msg).await.unwrap();
+        if timeout(
+            Duration::from_millis(self.delivery_timeout),
+            receiver_from_actor,
+        )
+        .await
+        .is_err()
+        {
+            Err("Broadcast timed out".into())
         } else {
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::node::protocol::{HeartbeatMessage, ProtocolMessage};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn it_should_return_ok_on_send_broadcast() {
+        let members = vec!["a".to_string(), "b".to_string()];
+        let delivery_timeout = 10;
+        let mock_reliable_sender = ReliableSenderHandle::default();
+        let handle = EchoBroadcastHandle::start(mock_reliable_sender, delivery_timeout, members);
+
+        let message = HeartbeatMessage::start().unwrap();
+        let result = handle.send_broadcast(message).await;
+        assert!(result.is_ok());
     }
 }

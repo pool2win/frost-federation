@@ -57,7 +57,7 @@ impl Node {
             bind_address: "localhost".to_string(),
             static_key_pem: String::new(),
             delivery_timeout: 500,
-            membership: MembershipHandle::start().await,
+            membership: MembershipHandle::start(500).await,
         }
     }
 
@@ -141,8 +141,15 @@ impl Node {
                     socket_addr.to_string(),
                 )
                 .await;
-            self.membership
-                .add_member(socket_addr.to_string(), reliable_sender_handle.clone());
+            if self
+                .membership
+                .add_member(socket_addr.to_string(), reliable_sender_handle.clone())
+                .await
+                .is_err()
+            {
+                log::debug!("Error adding new connection to membership. Stopping.");
+                return;
+            }
             // Start the first protocol to start interaction between nodes
             protocol::start_protocol::<HandshakeMessage>(reliable_sender_handle).await;
         }
@@ -169,8 +176,14 @@ impl Node {
                         peer_addr.to_string(),
                     )
                     .await;
-                self.membership
-                    .add_member(peer_addr.to_string(), reliable_sender_handle);
+                if self
+                    .membership
+                    .add_member(peer_addr.to_string(), reliable_sender_handle)
+                    .await
+                    .is_err()
+                {
+                    log::debug!("Error adding new connection to membership. Stopping.");
+                }
             } else {
                 log::debug!("Failed to connect to seed {}", seed);
             }
@@ -209,7 +222,7 @@ impl Node {
                 }
             }
             log::debug!("Connection clean up");
-            membership_handle.remove_member(addr);
+            let _ = membership_handle.remove_member(addr).await;
         });
         reliable_sender_handle
     }
