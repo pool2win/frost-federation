@@ -48,6 +48,15 @@ impl Message {
             Message::Ping(m) => m.response_for_received(node_id),
         }
     }
+
+    /// return the sender_id for all message types
+    pub fn get_sender_id(&self) -> String {
+        match self {
+            Message::Handshake(m) => m.sender_id.clone(),
+            Message::Heartbeat(m) => m.sender_id.clone(),
+            Message::Ping(m) => m.sender_id.clone(),
+        }
+    }
 }
 
 pub async fn start_protocol<M>(handle: ReliableSenderHandle, node_id: &str)

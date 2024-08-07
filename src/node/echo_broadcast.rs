@@ -86,14 +86,16 @@ impl EchoBroadcastActor {
     /// 1. Wait for echos from all members for the message sent
     /// 2. On timeout return error
     /// 3. On receiving echos from all members, return Ok() to waiting receiver
-
     pub async fn send_message(
         &mut self,
         data: Message,
         respond_to: ConnectionResultSender,
     ) -> Result<(), Box<dyn Error + Sync + Send>> {
-        let _ = self.reliable_sender.send(data).await;
-        // self.echos[data.sender] = true;
+        let sender_id = data.get_sender_id();
+        if self.reliable_sender.send(data).await.is_err() {
+            return Err("Error sending message using reliable sender".into());
+        }
+        self.echos.insert(sender_id, true);
         Ok(())
     }
 
@@ -177,5 +179,56 @@ mod tests {
         let message = HeartbeatMessage::start("localhost".into()).unwrap();
         let result = handle.send_broadcast(message).await;
         assert!(result.is_ok());
+    }
+}
+
+#[cfg(test)]
+mod echo_broadcast_actor_tests {
+    use crate::node::protocol::{HeartbeatMessage, PingMessage, ProtocolMessage};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn it_should_create_actor_with_echos_setup() {
+        let members = vec!["a".to_string(), "b".to_string()];
+        let (_sender, receiver) = mpsc::channel(32);
+        let mock_reliable_sender = ReliableSenderHandle::default();
+        let actor = EchoBroadcastActor::start(mock_reliable_sender, receiver, members);
+
+        assert_eq!(actor.echos.keys().count(), 2);
+    }
+
+    #[tokio::test]
+    async fn it_should_handle_send_broadcast_message_with_ok_from_reliable_sender() {
+        let members = vec!["a".to_string(), "b".to_string()];
+        let (_sender, receiver) = mpsc::channel(32);
+        let (respond_to, waiting_for_response) = oneshot::channel();
+
+        let mut mock_reliable_sender = ReliableSenderHandle::default();
+        let _ = mock_reliable_sender.expect_send().return_once(|_| Ok(()));
+
+        let mut actor = EchoBroadcastActor::start(mock_reliable_sender, receiver, members);
+
+        let data = PingMessage::start("a").unwrap();
+        let result = actor.send_message(data, respond_to).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn it_should_handle_send_broadcast_message_with_error_from_reliable_sender() {
+        let members = vec!["a".to_string(), "b".to_string()];
+        let (_sender, receiver) = mpsc::channel(32);
+        let (respond_to, waiting_for_response) = oneshot::channel();
+
+        let mut mock_reliable_sender = ReliableSenderHandle::default();
+        let _ = mock_reliable_sender
+            .expect_send()
+            .return_once(|_| Err("some error".into()));
+
+        let mut actor = EchoBroadcastActor::start(mock_reliable_sender, receiver, members);
+
+        let data = PingMessage::start("a").unwrap();
+        let result = actor.send_message(data, respond_to).await;
+        assert!(result.is_err());
     }
 }
