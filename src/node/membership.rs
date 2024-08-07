@@ -50,20 +50,20 @@ impl MembershipActor {
 
     pub fn add_member(
         &mut self,
-        addr: String,
+        node_id: String,
         handle: ReliableSenderHandle,
         respond_to: oneshot::Sender<()>,
     ) {
-        self.members.insert(addr, handle);
+        self.members.insert(node_id, handle);
         let _ = respond_to.send(());
     }
 
     pub fn remove_member(
         &mut self,
-        addr: String,
+        node_id: String,
         respond_to: oneshot::Sender<Option<ReliableSenderHandle>>,
     ) {
-        let removed = self.members.remove(&addr);
+        let removed = self.members.remove(&node_id);
         let _ = respond_to.send(removed);
     }
 
@@ -93,10 +93,12 @@ impl MembershipActor {
 pub async fn run_membership_actor(mut actor: MembershipActor) {
     while let Some(message) = actor.receiver.recv().await {
         match message {
-            MembershipMessage::Add(addr, handle, respond_to) => {
-                actor.add_member(addr, handle, respond_to)
+            MembershipMessage::Add(node_id, handle, respond_to) => {
+                actor.add_member(node_id, handle, respond_to)
             }
-            MembershipMessage::Remove(addr, respond_to) => actor.remove_member(addr, respond_to),
+            MembershipMessage::Remove(node_id, respond_to) => {
+                actor.remove_member(node_id, respond_to)
+            }
             MembershipMessage::Broadcast(message, respond_to) => {
                 actor.send_broadcast(message, respond_to).await;
             }
