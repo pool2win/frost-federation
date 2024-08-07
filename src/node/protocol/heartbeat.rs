@@ -21,17 +21,19 @@ use std::time::SystemTime;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct HeartbeatMessage {
+    pub sender_id: String,
     pub time: SystemTime,
 }
 
 impl ProtocolMessage for HeartbeatMessage {
-    fn start() -> Option<Message> {
+    fn start(node_id: &str) -> Option<Message> {
         Some(Message::Heartbeat(HeartbeatMessage {
+            sender_id: node_id.to_string(),
             time: SystemTime::now(),
         }))
     }
 
-    fn response_for_received(&self) -> Result<Option<Message>, String> {
+    fn response_for_received(&self, _id: &str) -> Result<Option<Message>, String> {
         log::info!("Received {:?}", self);
         Ok(None)
     }
@@ -46,15 +48,16 @@ mod tests {
 
     #[test]
     fn it_matches_start_message_for_handshake() {
-        if let Some(Message::Heartbeat(start_message)) = HeartbeatMessage::start() {
+        if let Some(Message::Heartbeat(start_message)) = HeartbeatMessage::start("localhost".into())
+        {
             assert!(start_message.time < SystemTime::now());
         }
     }
 
     #[test]
     fn it_matches_response_message_for_correct_handshake_start() {
-        let start_message = HeartbeatMessage::start().unwrap();
-        let response = start_message.response_for_received().unwrap();
+        let start_message = HeartbeatMessage::start("localhost".into()).unwrap();
+        let response = start_message.response_for_received("localhost").unwrap();
         assert_eq!(response, None);
     }
 }

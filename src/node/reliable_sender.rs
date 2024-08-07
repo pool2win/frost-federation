@@ -278,6 +278,7 @@ mod tests {
     fn it_serializes_ping_message() {
         let ping_reliable_message = ReliableNetworkMessage::Send(
             Message::Ping(PingMessage {
+                sender_id: "localhost".to_string(),
                 message: String::from("ping"),
             }),
             1,
@@ -294,6 +295,7 @@ mod tests {
     fn it_serializes_ping_message_using_as_bytes() {
         let ping_reliable_message = ReliableNetworkMessage::Send(
             Message::Ping(PingMessage {
+                sender_id: "localhost".to_string(),
                 message: String::from("ping"),
             }),
             1,
@@ -319,7 +321,7 @@ mod tests {
         )
         .await;
 
-        let message = PingMessage::start().unwrap();
+        let message = PingMessage::start("localhost").unwrap();
 
         let ack_task = tokio::spawn(async move {
             let _ = connection_sender.send(ReliableNetworkMessage::Ack(1)).await;
@@ -346,7 +348,7 @@ mod tests {
         )
         .await;
 
-        let message = PingMessage::start().unwrap();
+        let message = PingMessage::start("localhost").unwrap();
 
         let send_result = reliable_sender_handler.send(message).await;
         assert!(send_result.is_err());
@@ -367,7 +369,7 @@ mod tests {
         )
         .await;
 
-        let message = PingMessage::start().unwrap();
+        let message = PingMessage::start("localhost").unwrap();
         let _ = connection_sender
             .send(ReliableNetworkMessage::Send(message.clone(), 1))
             .await;
@@ -393,7 +395,7 @@ mod tests {
         )
         .await;
 
-        let message = PingMessage::start().unwrap();
+        let message = PingMessage::start("localhost").unwrap();
         let _ = connection_sender
             .send(ReliableNetworkMessage::Send(message.clone(), 1))
             .await;
