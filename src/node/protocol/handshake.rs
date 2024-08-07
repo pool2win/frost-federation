@@ -21,30 +21,39 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct HandshakeMessage {
+    pub sender_id: String,
     pub message: String,
     pub version: String,
 }
 
 impl ProtocolMessage for HandshakeMessage {
-    fn start() -> Option<Message> {
+    fn start(node_id: &str) -> Option<Message> {
         Some(Message::Handshake(HandshakeMessage {
+            sender_id: node_id.to_string(),
             message: String::from("helo"),
             version: String::from("0.1.0"),
         }))
     }
 
-    fn response_for_received(&self) -> Result<Option<Message>, String> {
+    fn response_for_received(&self, id: &str) -> Result<Option<Message>, String> {
         log::info!("Received {:?}", self);
         match self {
-            HandshakeMessage { message, version } if message == "helo" && version == "0.1.0" => {
+            HandshakeMessage {
+                sender_id: _,
+                message,
+                version,
+            } if message == "helo" && version == "0.1.0" => {
                 Ok(Some(Message::Handshake(HandshakeMessage {
+                    sender_id: id.to_string(),
                     message: String::from("oleh"),
                     version: String::from("0.1.0"),
                 })))
             }
-            HandshakeMessage { message, version } if message == "oleh" && version == "0.1.0" => {
-                Ok(None)
-            }
+            HandshakeMessage {
+                sender_id: _,
+                message,
+                version,
+            } if message == "oleh" && version == "0.1.0" => Ok(None),
             _ => Err("Bad message".to_string()),
         }
     }
@@ -56,10 +65,11 @@ mod tests {
 
     #[test]
     fn it_matches_start_message_for_handshake() {
-        let start_message = HandshakeMessage::start().unwrap();
+        let start_message = HandshakeMessage::start("localhost".into()).unwrap();
         assert_eq!(
             start_message,
             Message::Handshake(HandshakeMessage {
+                sender_id: "localhost".into(),
                 message: String::from("helo"),
                 version: String::from("0.1.0"),
             })
@@ -68,11 +78,12 @@ mod tests {
 
     #[test]
     fn it_matches_response_message_for_correct_handshake_start() {
-        let start_message = HandshakeMessage::start().unwrap();
-        let response = start_message.response_for_received().unwrap();
+        let start_message = HandshakeMessage::start("localhost".into()).unwrap();
+        let response = start_message.response_for_received("localhost").unwrap();
         assert_eq!(
             response,
             Some(Message::Handshake(HandshakeMessage {
+                sender_id: "localhost".into(),
                 message: String::from("oleh"),
                 version: String::from("0.1.0"),
             }))
@@ -82,22 +93,24 @@ mod tests {
     #[test]
     fn it_matches_error_response_message_for_incorrect_handshake_start() {
         let start_message = Message::Handshake(HandshakeMessage {
+            sender_id: "localhost".into(),
             message: String::from("bad-message"),
             version: String::from("0.1.0"),
         });
 
-        let response = start_message.response_for_received();
+        let response = start_message.response_for_received("localhost");
         assert_eq!(response, Err("Bad message".to_string()));
     }
 
     #[test]
     fn it_matches_error_response_message_for_incorrect_handshake_version() {
         let start_message = Message::Handshake(HandshakeMessage {
+            sender_id: "localhost".into(),
             message: String::from("helo"),
             version: String::from("0.2.0"),
         });
 
-        let response = start_message.response_for_received();
+        let response = start_message.response_for_received("localhost");
         assert_eq!(response, Err("Bad message".to_string()));
     }
 }

@@ -253,12 +253,12 @@ mod tests {
             .expect_read_handshake_message()
             .return_const(Bytes::from("-> e"));
         noise.expect_start_transport().return_const(());
-        let msg = ReliableNetworkMessage::Send(PingMessage::start().unwrap(), 1);
+        let msg = ReliableNetworkMessage::Send(PingMessage::start("localhost".into()).unwrap(), 1);
         noise
             .expect_build_transport_message()
             .return_const(msg.as_bytes().unwrap());
         noise.expect_read_transport_message().returning(|_| {
-            ReliableNetworkMessage::Send(PingMessage::start().unwrap(), 2)
+            ReliableNetworkMessage::Send(PingMessage::start("localhost".into()).unwrap(), 2)
                 .as_bytes()
                 .unwrap()
         });
@@ -269,7 +269,7 @@ mod tests {
         let received_msg = receiver.recv().await.unwrap();
         assert_eq!(
             received_msg,
-            ReliableNetworkMessage::Send(PingMessage::start().unwrap(), 2)
+            ReliableNetworkMessage::Send(PingMessage::start("localhost".into()).unwrap(), 2)
         );
     }
 }

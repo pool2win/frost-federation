@@ -21,19 +21,22 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct PingMessage {
+    pub sender_id: String,
     pub message: String,
 }
 
 impl ProtocolMessage for PingMessage {
-    fn start() -> Option<Message> {
+    fn start(node_id: &str) -> Option<Message> {
         Some(Message::Ping(PingMessage {
+            sender_id: node_id.to_string(),
             message: String::from("ping"),
         }))
     }
 
-    fn response_for_received(&self) -> Result<Option<Message>, String> {
+    fn response_for_received(&self, id: &str) -> Result<Option<Message>, String> {
         if self.message == "ping" {
             Ok(Some(Message::Ping(PingMessage {
+                sender_id: id.to_string(),
                 message: String::from("pong"),
             })))
         } else {
@@ -49,18 +52,22 @@ mod tests {
 
     #[test]
     fn it_matches_start_message_for_ping() {
-        if let Some(Message::Ping(start_message)) = PingMessage::start() {
+        if let Some(Message::Ping(start_message)) = PingMessage::start("localhost".into()) {
             assert_eq!(start_message.message, "ping".to_string());
         }
     }
 
     #[test]
     fn it_matches_response_message_for_correct_handshake_start() {
-        let start_message = PingMessage::start().unwrap();
-        let response = start_message.response_for_received().unwrap().unwrap();
+        let start_message = PingMessage::start("localhost".into()).unwrap();
+        let response = start_message
+            .response_for_received("localhost")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             response,
             Message::Ping(PingMessage {
+                sender_id: "localhost".to_string(),
                 message: "pong".to_string()
             })
         );

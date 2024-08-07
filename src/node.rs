@@ -151,7 +151,11 @@ impl Node {
                 return;
             }
             // Start the first protocol to start interaction between nodes
-            protocol::start_protocol::<HandshakeMessage>(reliable_sender_handle).await;
+            protocol::start_protocol::<HandshakeMessage>(
+                reliable_sender_handle,
+                &self.bind_address,
+            )
+            .await;
         }
     }
 
@@ -205,10 +209,11 @@ impl Node {
         .await;
         let cloned = reliable_sender_handle.clone();
         let membership_handle = self.membership.clone();
+        let node_id = self.bind_address.clone();
         tokio::spawn(async move {
             while let Some(message) = application_receiver.recv().await {
                 log::debug!("Application message received {:?}", message);
-                match message.response_for_received() {
+                match message.response_for_received(&node_id) {
                     Ok(Some(response)) => {
                         log::debug!("Sending Response {:?}", response);
                         let _ = cloned.send(response).await;

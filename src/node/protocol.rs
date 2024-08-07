@@ -41,20 +41,20 @@ pub enum Message {
 /// Methods for all protocol messages
 impl Message {
     /// Generates the response to send for a message received
-    pub fn response_for_received(&self) -> Result<Option<Message>, String> {
+    pub fn response_for_received(&self, node_id: &str) -> Result<Option<Message>, String> {
         match self {
-            Message::Handshake(m) => m.response_for_received(),
-            Message::Heartbeat(m) => m.response_for_received(),
-            Message::Ping(m) => m.response_for_received(),
+            Message::Handshake(m) => m.response_for_received(node_id),
+            Message::Heartbeat(m) => m.response_for_received(node_id),
+            Message::Ping(m) => m.response_for_received(node_id),
         }
     }
 }
 
-pub async fn start_protocol<M>(handle: ReliableSenderHandle)
+pub async fn start_protocol<M>(handle: ReliableSenderHandle, node_id: &str)
 where
     M: ProtocolMessage,
 {
-    if let Some(message) = M::start() {
+    if let Some(message) = M::start(node_id) {
         log::debug!("Sending initial handshake message");
         if let Err(e) = handle.send(message).await {
             log::info!("Error sending start protocol message {}", e);
@@ -67,8 +67,8 @@ pub trait ProtocolMessage
 where
     Self: Sized,
 {
-    fn start() -> Option<Message>;
-    fn response_for_received(&self) -> Result<Option<Message>, String>;
+    fn start(node_id: &str) -> Option<Message>;
+    fn response_for_received(&self, node_id: &str) -> Result<Option<Message>, String>;
 }
 
 #[cfg(test)]
@@ -83,10 +83,11 @@ mod tests {
 
     #[test]
     fn it_matches_start_message_for_ping() {
-        let start_message = PingMessage::start().unwrap();
+        let start_message = PingMessage::start("localhost").unwrap();
         assert_eq!(
             start_message,
             Message::Ping(PingMessage {
+                sender_id: "localhost".to_string(),
                 message: String::from("ping")
             })
         );
@@ -95,13 +96,15 @@ mod tests {
     #[test]
     fn it_invokes_received_message_after_deseralization() {
         let msg = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
             message: String::from("ping"),
         });
 
-        let response = msg.response_for_received().unwrap();
+        let response = msg.response_for_received("localhost").unwrap();
         assert_eq!(
             response,
             Some(Message::Ping(PingMessage {
+                sender_id: "localhost".to_string(),
                 message: String::from("pong")
             }))
         );
@@ -112,7 +115,7 @@ mod tests {
         let mut handle_mock = MockReliableSenderHandle::default();
 
         handle_mock.expect_send().return_once(|_| Ok(()));
-        start_protocol::<HandshakeMessage>(handle_mock).await;
+        start_protocol::<HandshakeMessage>(handle_mock, "localhost".into()).await;
     }
 
     #[tokio::test]
@@ -122,6 +125,6 @@ mod tests {
         handle_mock
             .expect_send()
             .return_once(|_| Err("Some error".into()));
-        start_protocol::<HandshakeMessage>(handle_mock).await;
+        start_protocol::<HandshakeMessage>(handle_mock, "localhost".into()).await;
     }
 }

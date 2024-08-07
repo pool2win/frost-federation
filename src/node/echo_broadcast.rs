@@ -174,7 +174,7 @@ mod tests {
         let mock_reliable_sender = ReliableSenderHandle::default();
         let handle = EchoBroadcastHandle::start(mock_reliable_sender, delivery_timeout, members);
 
-        let message = HeartbeatMessage::start().unwrap();
+        let message = HeartbeatMessage::start("localhost".into()).unwrap();
         let result = handle.send_broadcast(message).await;
         assert!(result.is_ok());
     }
