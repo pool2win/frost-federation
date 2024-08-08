@@ -67,12 +67,9 @@ impl EchoBroadcastActor {
     pub async fn handle_message(&mut self, message: EchoBroadcastMessage) {
         match message {
             EchoBroadcastMessage::Send { data, respond_to } => {
-                // TODO: Start book keeping for waiting for echo
-                // Send message once book keeping has started
                 let _ = self.send_message(data, respond_to).await;
             }
             EchoBroadcastMessage::Echo { data, respond_to } => {
-                // TODO: Update waiting for echo
                 self.handle_received_echo(data, respond_to).await;
             }
         }
@@ -99,11 +96,16 @@ impl EchoBroadcastActor {
         Ok(())
     }
 
+    /// Handle Echo messages received for this message
     pub async fn handle_received_echo(
         &mut self,
         data: Message,
         respond_to: ConnectionResultSender,
     ) {
+        self.echos.insert(data.get_sender_id(), true);
+        if self.echos.iter().all(|(_id, status)| *status) {
+            let _ = respond_to.send(Ok(()));
+        }
     }
 }
 
