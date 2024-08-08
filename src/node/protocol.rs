@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 
 mod handshake;
 mod heartbeat;
+mod message_id_generator;
 mod ping;
 
 pub use handshake::HandshakeMessage;
