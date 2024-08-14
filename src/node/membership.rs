@@ -28,8 +28,8 @@ use super::echo_broadcast::EchoBroadcastHandle;
 pub enum MembershipMessage {
     Add(String, ReliableSenderHandle, oneshot::Sender<()>),
     Remove(String, oneshot::Sender<Option<ReliableSenderHandle>>),
-    GetSenders(oneshot::Sender<Vec<ReliableSenderHandle>>),
     Broadcast(Message, oneshot::Sender<()>),
+    GetMembers(oneshot::Sender<Vec<String>>),
 }
 
 #[derive(Debug)]
@@ -67,8 +67,8 @@ impl MembershipActor {
         let _ = respond_to.send(removed);
     }
 
-    pub fn get_senders(&self, respond_to: oneshot::Sender<Vec<ReliableSenderHandle>>) {
-        let members: Vec<ReliableSenderHandle> = self.members.values().cloned().collect();
+    pub fn get_members(&self, respond_to: oneshot::Sender<Vec<String>>) {
+        let members: Vec<String> = self.members.keys().cloned().collect();
         let _ = respond_to.send(members);
     }
 
@@ -102,7 +102,7 @@ pub async fn run_membership_actor(mut actor: MembershipActor) {
             MembershipMessage::Broadcast(message, respond_to) => {
                 actor.send_broadcast(message, respond_to).await;
             }
-            MembershipMessage::GetSenders(respond_to) => actor.get_senders(respond_to),
+            MembershipMessage::GetMembers(respond_to) => actor.get_members(respond_to),
         }
     }
 }
@@ -146,15 +146,15 @@ impl MembershipHandle {
         }
     }
 
-    pub async fn get_senders(&self) -> Result<Vec<ReliableSenderHandle>, Box<dyn Error>> {
+    pub async fn get_members(&self) -> Result<Vec<String>, Box<dyn Error>> {
         let (respond_to, receiver) = oneshot::channel();
         if self
             .sender
-            .send(MembershipMessage::GetSenders(respond_to))
+            .send(MembershipMessage::GetMembers(respond_to))
             .await
             .is_err()
         {
-            return Err("Error sending request to get reliable senders".into());
+            return Err("Error sending request to get members".into());
         }
         match receiver.await {
             Err(_) => Err("Error reading membership".into()),
@@ -201,7 +201,7 @@ mod tests {
     async fn it_should_return_members_as_empty_vec() {
         let membership_handle = MembershipHandle::start(500).await;
 
-        let reliable_senders = membership_handle.get_senders().await;
+        let reliable_senders = membership_handle.get_members().await;
         assert!(reliable_senders.unwrap().is_empty());
     }
 
@@ -216,7 +216,7 @@ mod tests {
             .add_member("localhost".to_string(), reliable_sender_handle)
             .await;
 
-        let reliable_senders = membership_handle.get_senders().await;
+        let reliable_senders = membership_handle.get_members().await;
         assert_eq!(reliable_senders.unwrap().len(), 1);
     }
 }
