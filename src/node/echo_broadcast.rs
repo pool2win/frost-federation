@@ -26,6 +26,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
+use tokio::time::error::Elapsed;
 use tokio::time::timeout;
 
 type EchosMap = HashMap<MessageId, HashMap<String, bool>>;
@@ -97,12 +98,11 @@ impl EchoBroadcastActor {
         let sender_id = data.get_sender_id();
         for (member, reliable_sender) in self.reliable_sender_map.iter_mut() {
             if reliable_sender.send(data.clone()).await.is_err() {
+                log::debug!("Error in reliable sender send...");
+                let _ = respond_to.send(Err("Error sending using reliable sender".into()));
                 return Err("Error sending message using reliable sender".into());
             }
-            let details = self
-                .echos
-                .entry(message_id.clone())
-                .or_insert(HashMap::new());
+            let details = self.echos.entry(message_id.clone()).or_default();
             details.entry(member.clone()).or_insert(false);
         }
         // Update sender_id's echo to true
@@ -191,14 +191,17 @@ impl EchoBroadcastHandle {
             message_id: self.message_id_generator.next(),
             respond_to: sender_from_actor,
         };
-        self.sender.send(msg).await.unwrap();
-        if timeout(
+        if self.sender.send(msg).await.is_err() {
+            log::debug!("Returning send error...");
+            return Err("Connection error".into());
+        }
+        let result = timeout(
             Duration::from_millis(self.delivery_timeout),
             receiver_from_actor,
         )
-        .await
-        .is_err()
-        {
+        .await;
+        if result??.is_err() {
+            log::debug!("Returning time out error...");
             Err("Broadcast timed out".into())
         } else {
             Ok(())
@@ -218,15 +221,16 @@ mockall::mock! {
 }
 
 #[cfg(test)]
-mod tests {
+mod echo_broadcast_handler_tests {
     use crate::node::protocol::{HeartbeatMessage, ProtocolMessage};
 
     use super::*;
 
     #[tokio::test]
-    async fn it_should_return_ok_on_send() {
+    async fn it_should_return_timeout_error_on_send_without_echos() {
         let delivery_timeout = 10;
-        let mock_reliable_sender = ReliableSenderHandle::default();
+        let mut mock_reliable_sender = ReliableSenderHandle::default();
+        mock_reliable_sender.expect_send().return_once(|_| Ok(()));
         let reliable_senders_map = HashMap::from([("a".to_string(), mock_reliable_sender)]);
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
 
@@ -238,7 +242,7 @@ mod tests {
 
         let message = HeartbeatMessage::start("localhost".into()).unwrap();
         let result = handle.send(message).await;
-        assert!(result.is_ok());
+        assert!(result.is_err());
     }
 }
 
@@ -295,22 +299,74 @@ mod echo_broadcast_actor_tests {
     }
 
     #[tokio::test]
-    async fn it_should_send_without_errors_if_no_errors_returned_from_echo_broadcasts() {
+    async fn it_should_send_handle_errors_if_echos_time_out() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut first_reliable_sender_handle = ReliableSenderHandle::default();
         let mut second_reliable_sender_handle = ReliableSenderHandle::default();
         let msg = PingMessage::start("a").unwrap();
 
         first_reliable_sender_handle
-            .expect_clone()
-            .returning(ReliableSenderHandle::default);
+            .expect_send()
+            .return_once(|_| Ok(()));
         second_reliable_sender_handle
-            .expect_clone()
-            .returning(ReliableSenderHandle::default);
+            .expect_send()
+            .return_once(|_| Ok(()));
 
-        let mut mock_echo_bcast = MockEchoBroadcastHandle::default();
-        mock_echo_bcast.expect_send().return_once(|_| Ok(()));
+        let reliable_senders_map = HashMap::from([
+            ("a".to_string(), first_reliable_sender_handle),
+            ("b".to_string(), second_reliable_sender_handle),
+        ]);
+        let message_id_generator = MessageIdGenerator::new("localhost".to_string());
+        let delivery_timeout = 1000;
 
-        let result = mock_echo_bcast.send(msg).await;
-        assert!(result.is_ok());
+        let echo_bcast = EchoBroadcastHandle::start(
+            message_id_generator,
+            delivery_timeout,
+            reliable_senders_map,
+        );
+
+        let result = echo_bcast.send(msg).await;
+        assert_eq!(
+            result.as_ref().unwrap_err().to_string(),
+            "deadline has elapsed"
+        );
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn it_should_send_handle_errors_if_reliable_sender_returns_error() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        let mut first_reliable_sender_handle = ReliableSenderHandle::default();
+        let mut second_reliable_sender_handle = ReliableSenderHandle::default();
+        let msg = PingMessage::start("a").unwrap();
+
+        first_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| Ok(()));
+        second_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| Err("Error sending message".into()));
+
+        let reliable_senders_map = HashMap::from([
+            ("a".to_string(), first_reliable_sender_handle),
+            ("b".to_string(), second_reliable_sender_handle),
+        ]);
+        let message_id_generator = MessageIdGenerator::new("localhost".to_string());
+        let delivery_timeout = 1000;
+
+        let echo_bcast = EchoBroadcastHandle::start(
+            message_id_generator,
+            delivery_timeout,
+            reliable_senders_map,
+        );
+
+        let result = echo_bcast.send(msg).await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.as_ref().unwrap_err().to_string(),
+            "Broadcast timed out"
+        );
     }
 }
