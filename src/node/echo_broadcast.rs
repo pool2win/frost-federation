@@ -406,4 +406,38 @@ mod echo_broadcast_actor_tests {
             .get("a")
             .is_some());
     }
+
+    #[tokio::test]
+    async fn it_should_add_echo_in_various_cases() {
+        let mut first_reliable_sender_handle = ReliableSenderHandle::default();
+        let mut second_reliable_sender_handle = ReliableSenderHandle::default();
+
+        first_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| Ok(()));
+        second_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| Err("Error sending message".into()));
+
+        let reliable_senders_map = HashMap::from([
+            ("a".to_string(), first_reliable_sender_handle),
+            ("b".to_string(), second_reliable_sender_handle),
+        ]);
+
+        let (_sender, receiver) = mpsc::channel(32);
+        let mut echo_bcast_actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
+
+        echo_bcast_actor.add_echo(&MessageId(1), "a".to_string());
+        echo_bcast_actor.add_echo(&MessageId(2), "b".to_string());
+
+        assert_eq!(echo_bcast_actor.echos.len(), 2);
+        assert_eq!(echo_bcast_actor.echos.get(&MessageId(1)).unwrap().len(), 1);
+        assert_eq!(echo_bcast_actor.echos.get(&MessageId(2)).unwrap().len(), 1);
+
+        // try to add same echo again
+        echo_bcast_actor.add_echo(&MessageId(1), "a".to_string());
+        assert_eq!(echo_bcast_actor.echos.len(), 2);
+        assert_eq!(echo_bcast_actor.echos.get(&MessageId(1)).unwrap().len(), 1);
+        assert_eq!(echo_bcast_actor.echos.get(&MessageId(2)).unwrap().len(), 1);
+    }
 }
