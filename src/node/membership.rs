@@ -16,25 +16,23 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use crate::node::protocol::Message;
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
 use std::collections::HashMap;
 use std::error::Error;
 use tokio::sync::{mpsc, oneshot};
 
-use super::echo_broadcast::EchoBroadcastHandle;
+pub type ReliableSenderMap = HashMap<String, ReliableSenderHandle>;
 
 pub enum MembershipMessage {
     Add(String, ReliableSenderHandle, oneshot::Sender<()>),
     Remove(String, oneshot::Sender<Option<ReliableSenderHandle>>),
-    Broadcast(Message, oneshot::Sender<()>),
-    GetMembers(oneshot::Sender<Vec<String>>),
+    GetMembers(oneshot::Sender<ReliableSenderMap>),
 }
 
 #[derive(Debug)]
 pub(crate) struct MembershipActor {
-    members: HashMap<String, ReliableSenderHandle>,
+    members: ReliableSenderMap,
     receiver: mpsc::Receiver<MembershipMessage>,
     delivery_timeout: u64,
 }
@@ -67,26 +65,8 @@ impl MembershipActor {
         let _ = respond_to.send(removed);
     }
 
-    pub fn get_members(&self, respond_to: oneshot::Sender<Vec<String>>) {
-        let members: Vec<String> = self.members.keys().cloned().collect();
-        let _ = respond_to.send(members);
-    }
-
-    /// Send an Echo Broadcast message.
-    ///
-    /// Use the reliable senders in the member's variable, then hand
-    /// over further processing to EchoBroadcastHandle
-    pub async fn send_broadcast(&mut self, message: Message, respond_to: oneshot::Sender<()>) {
-        let current_members: Vec<String> = self.members.keys().cloned().collect();
-        // TODO: These all should be awaited in concurrently
-        for reliable_sender in self.members.values() {
-            let echo_broadcast = EchoBroadcastHandle::start(
-                (*reliable_sender).clone(),
-                self.delivery_timeout,
-                current_members.clone(),
-            );
-            let _ = echo_broadcast.send_broadcast(message.clone()).await;
-        }
+    pub fn get_members(&self, respond_to: oneshot::Sender<ReliableSenderMap>) {
+        let _ = respond_to.send(self.members.clone());
     }
 }
 
@@ -99,21 +79,18 @@ pub async fn run_membership_actor(mut actor: MembershipActor) {
             MembershipMessage::Remove(node_id, respond_to) => {
                 actor.remove_member(node_id, respond_to)
             }
-            MembershipMessage::Broadcast(message, respond_to) => {
-                actor.send_broadcast(message, respond_to).await;
-            }
             MembershipMessage::GetMembers(respond_to) => actor.get_members(respond_to),
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct MembershipHandle {
     sender: mpsc::Sender<MembershipMessage>,
 }
 
 impl MembershipHandle {
-    pub async fn start(delivery_timeout: u64) -> Self {
+    pub async fn start(delivery_timeout: u64, node_id: String) -> Self {
         let (sender, receiver) = mpsc::channel(32);
         let actor = MembershipActor::start(receiver, delivery_timeout);
         tokio::spawn(run_membership_actor(actor));
@@ -126,11 +103,14 @@ impl MembershipHandle {
         handle: ReliableSenderHandle,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let (respond_to, receiver) = oneshot::channel();
-        let msg = MembershipMessage::Add(member, handle, respond_to);
+        let msg = MembershipMessage::Add(member.clone(), handle, respond_to);
         let _ = self.sender.send(msg).await;
         match receiver.await {
             Err(_) => Err("Error adding member".into()),
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                log::info!("New member added: {}", member);
+                Ok(())
+            }
         }
     }
 
@@ -146,7 +126,7 @@ impl MembershipHandle {
         }
     }
 
-    pub async fn get_members(&self) -> Result<Vec<String>, Box<dyn Error>> {
+    pub async fn get_members(&self) -> Result<ReliableSenderMap, Box<dyn Error>> {
         let (respond_to, receiver) = oneshot::channel();
         if self
             .sender
@@ -166,10 +146,11 @@ impl MembershipHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::node::protocol::{PingMessage, ProtocolMessage};
 
     #[tokio::test]
     async fn it_should_create_membership_add_and_remove_members() {
-        let membership_handle = MembershipHandle::start(500).await;
+        let membership_handle = MembershipHandle::start(500, "localhost".to_string()).await;
         let reliable_sender_handle = ReliableSenderHandle::default();
         let reliable_sender_handle_2 = ReliableSenderHandle::default();
 
@@ -189,7 +170,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_should_result_in_error_when_removing_non_member() {
-        let membership_handle = MembershipHandle::start(500).await;
+        let membership_handle = MembershipHandle::start(500, "localhost".to_string()).await;
 
         assert!(membership_handle
             .remove_member("localhost22".to_string())
@@ -199,7 +180,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_should_return_members_as_empty_vec() {
-        let membership_handle = MembershipHandle::start(500).await;
+        let membership_handle = MembershipHandle::start(500, "localhost".to_string()).await;
 
         let reliable_senders = membership_handle.get_members().await;
         assert!(reliable_senders.unwrap().is_empty());
@@ -207,7 +188,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_should_return_members_as_vec() {
-        let membership_handle = MembershipHandle::start(500).await;
+        let membership_handle = MembershipHandle::start(500, "localhost".to_string()).await;
         let mut reliable_sender_handle = ReliableSenderHandle::default();
         reliable_sender_handle
             .expect_clone()

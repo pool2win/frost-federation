@@ -46,18 +46,19 @@ pub struct Node {
     pub bind_address: String,
     pub static_key_pem: String,
     pub delivery_timeout: u64,
-    pub membership: MembershipHandle,
+    pub membership_handle: MembershipHandle,
 }
 
 impl Node {
     /// Use builder pattern
     pub async fn new() -> Self {
+        let bind_address = "localhost".to_string();
         Node {
             seeds: vec!["localhost:6680".to_string()],
-            bind_address: "localhost".to_string(),
+            bind_address: bind_address.clone(),
             static_key_pem: String::new(),
             delivery_timeout: 500,
-            membership: MembershipHandle::start(500).await,
+            membership_handle: MembershipHandle::start(500, bind_address).await,
         }
     }
 
@@ -150,7 +151,7 @@ impl Node {
                 )
                 .await;
             if self
-                .membership
+                .membership_handle
                 .add_member(socket_addr.to_string(), reliable_sender_handle.clone())
                 .await
                 .is_err()
@@ -186,7 +187,7 @@ impl Node {
                     )
                     .await;
                 if self
-                    .membership
+                    .membership_handle
                     .add_member(peer_addr.to_string(), reliable_sender_handle)
                     .await
                     .is_err()
@@ -209,11 +210,10 @@ impl Node {
             connection_handle,
             connection_receiver,
             self.delivery_timeout,
-            self.membership.clone(),
         )
         .await;
         let cloned = reliable_sender_handle.clone();
-        let membership_handle = self.membership.clone();
+        let membership_handle = self.membership_handle.clone();
 
         let node_id = self.get_node_id();
         tokio::spawn(async move {

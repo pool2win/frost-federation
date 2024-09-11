@@ -19,7 +19,6 @@
 #[mockall_double::double]
 use crate::node::connection::ConnectionHandle;
 use crate::node::connection::{ConnectionResult, ConnectionResultSender};
-use crate::node::membership::MembershipHandle;
 use crate::node::protocol::Message;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -41,8 +40,6 @@ enum ReliableMessage {
 pub enum ReliableNetworkMessage {
     Send(Message, u64),
     Ack(u64),
-    Broadcast(Message, u64),
-    Echo(Message, u64),
 }
 
 /// Methods for all protocol messages
@@ -69,7 +66,6 @@ struct ReliableSenderActor {
     sequence_number: u64,
     connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
     application_sender: mpsc::Sender<Message>,
-    membership_handle: MembershipHandle,
 }
 
 impl ReliableSenderActor {
@@ -78,7 +74,6 @@ impl ReliableSenderActor {
         connection_handle: ConnectionHandle,
         connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
         application_sender: mpsc::Sender<Message>,
-        membership_handle: MembershipHandle,
     ) -> Self {
         ReliableSenderActor {
             receiver,
@@ -87,7 +82,6 @@ impl ReliableSenderActor {
             sequence_number: 0,
             connection_receiver,
             application_sender,
-            membership_handle,
         }
     }
 
@@ -119,7 +113,6 @@ impl ReliableSenderActor {
     /// Handle a message received from the network.
     /// If it is a Send type, send an Ack back
     /// If it is an Ack, then remove the acked message from waiting_for_ack and return Ok() to application waiting
-    /// If it is a Broadcast, then send an echo broadcast message to all current members
     async fn handle_connection_message(
         &mut self,
         msg: ReliableNetworkMessage,
@@ -152,13 +145,6 @@ impl ReliableSenderActor {
                         log::debug!("No message waiting for the ACK received");
                     }
                 }
-            }
-            ReliableNetworkMessage::Broadcast(message, sequence_number) => {
-                // let current_members = self.membership_handle
-                // [TODO: echo-broadcast] - Send echo back to all current members
-            }
-            ReliableNetworkMessage::Echo(message, sequence_number) => {
-                // [TODO: echo-broadcast] - Send echo back to all current members
             }
         }
         Ok(())
@@ -197,8 +183,7 @@ mockall::mock! {
     pub ReliableSenderHandle {
         pub async fn start(connection_handle: ConnectionHandle,
                            connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
-                           delivery_timeout: u64,
-                           membership_handle: MembershipHandle) ->
+                           delivery_timeout: u64) ->
             (Self, mpsc::Receiver<Message>);
         pub async fn send(&self, message: Message) -> ConnectionResult<()>;
     }
@@ -212,7 +197,6 @@ impl ReliableSenderHandle {
         connection_handle: ConnectionHandle,
         connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
         delivery_timeout: u64,
-        membership_handle: MembershipHandle,
     ) -> (Self, mpsc::Receiver<Message>) {
         let (sender, receiver) = mpsc::channel(32);
         let (application_sender, application_receiver) = mpsc::channel(32);
@@ -222,7 +206,6 @@ impl ReliableSenderHandle {
             connection_handle,
             connection_receiver,
             application_sender,
-            membership_handle,
         );
         tokio::spawn(start_reliable_sender(actor));
 
@@ -263,10 +246,9 @@ impl ReliableSenderHandle {
 }
 
 #[cfg(test)]
-mod tests {
+mod reliable_sender_tests {
     use super::ReliableNetworkMessage;
     use crate::node::connection::MockConnectionHandle;
-    use crate::node::membership::MembershipHandle;
     use crate::node::protocol::{Message, PingMessage, ProtocolMessage};
     use serde::Serialize;
     use tokio::sync::mpsc;
@@ -309,17 +291,11 @@ mod tests {
     #[tokio::test]
     async fn it_should_successfully_send_message_to_actor_and_receieve_an_ack() {
         let (connection_sender, connection_receiver) = mpsc::channel(32);
-        let membership_handle = MembershipHandle::start(500).await;
         let mut mock_connection_handle = MockConnectionHandle::default();
         mock_connection_handle.expect_send().return_once(|_| Ok(()));
 
-        let (reliable_sender_handler, _application_receiver) = ReliableSenderHandle::start(
-            mock_connection_handle,
-            connection_receiver,
-            500,
-            membership_handle,
-        )
-        .await;
+        let (reliable_sender_handler, _application_receiver) =
+            ReliableSenderHandle::start(mock_connection_handle, connection_receiver, 500).await;
 
         let message = PingMessage::start("localhost").unwrap();
 
@@ -336,17 +312,11 @@ mod tests {
     #[tokio::test]
     async fn it_should_successfully_send_message_to_actor_timeout_if_no_ack_received() {
         let (_connection_sender, connection_receiver) = mpsc::channel(32);
-        let membership_handle = MembershipHandle::start(500).await;
         let mut mock_connection_handle = MockConnectionHandle::default();
         mock_connection_handle.expect_send().return_once(|_| Ok(()));
 
-        let (reliable_sender_handler, _application_receiver) = ReliableSenderHandle::start(
-            mock_connection_handle,
-            connection_receiver,
-            500,
-            membership_handle,
-        )
-        .await;
+        let (reliable_sender_handler, _application_receiver) =
+            ReliableSenderHandle::start(mock_connection_handle, connection_receiver, 500).await;
 
         let message = PingMessage::start("localhost").unwrap();
 
@@ -357,17 +327,11 @@ mod tests {
     #[tokio::test]
     async fn it_should_successfully_send_ack_when_message_received() {
         let (connection_sender, connection_receiver) = mpsc::channel(32);
-        let membership_handle = MembershipHandle::start(500).await;
         let mut mock_connection_handle = MockConnectionHandle::default();
         mock_connection_handle.expect_send().return_once(|_| Ok(()));
 
-        let (_reliable_sender_handler, mut application_receiver) = ReliableSenderHandle::start(
-            mock_connection_handle,
-            connection_receiver,
-            500,
-            membership_handle,
-        )
-        .await;
+        let (_reliable_sender_handler, mut application_receiver) =
+            ReliableSenderHandle::start(mock_connection_handle, connection_receiver, 500).await;
 
         let message = PingMessage::start("localhost").unwrap();
         let _ = connection_sender
@@ -381,19 +345,13 @@ mod tests {
     #[tokio::test]
     async fn it_should_handle_error_on_message_received() {
         let (connection_sender, connection_receiver) = mpsc::channel(32);
-        let membership_handle = MembershipHandle::start(500).await;
         let mut mock_connection_handle = MockConnectionHandle::default();
         mock_connection_handle
             .expect_send()
             .return_once(|_| Err("Some error".into()));
 
-        let (_reliable_sender_handler, mut application_receiver) = ReliableSenderHandle::start(
-            mock_connection_handle,
-            connection_receiver,
-            500,
-            membership_handle,
-        )
-        .await;
+        let (_reliable_sender_handler, mut application_receiver) =
+            ReliableSenderHandle::start(mock_connection_handle, connection_receiver, 500).await;
 
         let message = PingMessage::start("localhost").unwrap();
         let _ = connection_sender
