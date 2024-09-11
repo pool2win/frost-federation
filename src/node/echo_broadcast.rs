@@ -114,21 +114,36 @@ impl EchoBroadcastActor {
         Ok(())
     }
 
-    /// Handle Echo messages received for this message
-    pub async fn handle_received_echo(&mut self, data: Message, message_id: MessageId) {
-        let sender_id = data.get_sender_id();
+    /// Check if echos have been received from all members for a given message identifier
+    pub fn echo_received_for_all(&self, message_id: &MessageId) -> bool {
         self.echos
-            .get_mut(&message_id)
-            .unwrap()
-            .insert(sender_id, true);
-
-        if self
-            .echos
-            .get(&message_id)
+            .get(message_id)
             .unwrap()
             .iter()
             .all(|(_sender_id, status)| *status)
-        {
+    }
+
+    /// Add received echo from a sender to the list of echos received
+    pub fn add_echo(&mut self, message_id: &MessageId, sender_id: String) {
+        match self.echos.get_mut(message_id) {
+            Some(echos) => {
+                echos.entry(sender_id).or_insert(true);
+            }
+            None => {
+                self.echos.insert(
+                    message_id.clone(),
+                    HashMap::<String, bool>::from([(sender_id, true)]),
+                );
+            }
+        }
+    }
+
+    /// Handle Echo messages received for this message
+    pub async fn handle_received_echo(&mut self, data: Message, message_id: MessageId) {
+        let sender_id = data.get_sender_id();
+        self.add_echo(&message_id, sender_id.clone());
+
+        if self.echo_received_for_all(&message_id) {
             match self.responders.remove(&message_id) {
                 Some(respond_to) => {
                     if respond_to.send(Ok(())).is_err() {
@@ -236,6 +251,8 @@ mod echo_broadcast_handler_tests {
 
 #[cfg(test)]
 mod echo_broadcast_actor_tests {
+    use std::borrow::Borrow;
+
     use crate::node::protocol::{PingMessage, ProtocolMessage};
 
     use super::*;
@@ -288,8 +305,6 @@ mod echo_broadcast_actor_tests {
 
     #[tokio::test]
     async fn it_should_send_handle_errors_if_echos_time_out() {
-        let _ = env_logger::builder().is_test(true).try_init();
-
         let mut first_reliable_sender_handle = ReliableSenderHandle::default();
         let mut second_reliable_sender_handle = ReliableSenderHandle::default();
         let msg = PingMessage::start("a").unwrap();
@@ -324,8 +339,6 @@ mod echo_broadcast_actor_tests {
 
     #[tokio::test]
     async fn it_should_send_handle_errors_if_reliable_sender_returns_error() {
-        let _ = env_logger::builder().is_test(true).try_init();
-
         let mut first_reliable_sender_handle = ReliableSenderHandle::default();
         let mut second_reliable_sender_handle = ReliableSenderHandle::default();
         let msg = PingMessage::start("a").unwrap();
@@ -356,5 +369,41 @@ mod echo_broadcast_actor_tests {
             result.as_ref().unwrap_err().to_string(),
             "Broadcast timed out"
         );
+    }
+
+    #[tokio::test]
+    async fn it_should_handle_echo_message_if_waiting_for_echos() {
+        let mut first_reliable_sender_handle = ReliableSenderHandle::default();
+        let mut second_reliable_sender_handle = ReliableSenderHandle::default();
+
+        first_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| Ok(()));
+        second_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| Err("Error sending message".into()));
+
+        let reliable_senders_map = HashMap::from([
+            ("a".to_string(), first_reliable_sender_handle),
+            ("b".to_string(), second_reliable_sender_handle),
+        ]);
+
+        let (_sender, receiver) = mpsc::channel(32);
+        let mut echo_bcast_actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
+        let ping_msg = PingMessage::start("a").unwrap();
+        let msg = EchoBroadcastMessage::Echo {
+            data: ping_msg,
+            message_id: MessageId(1),
+        };
+
+        let _result = echo_bcast_actor.handle_message(msg).await;
+        assert_eq!(echo_bcast_actor.echos.len(), 1);
+        assert_eq!(echo_bcast_actor.echos.get(&MessageId(1)).unwrap().len(), 1);
+        assert!(echo_bcast_actor
+            .echos
+            .get(&MessageId(1))
+            .unwrap()
+            .get("a")
+            .is_some());
     }
 }
