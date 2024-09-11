@@ -22,15 +22,14 @@ use serde::{Deserialize, Serialize};
 
 mod handshake;
 mod heartbeat;
-mod message_id_generator;
+pub(crate) mod message_id_generator;
 mod ping;
-
-pub use handshake::HandshakeMessage;
-pub use heartbeat::HeartbeatMessage;
-pub use ping::PingMessage;
 
 #[mockall_double::double]
 use super::reliable_sender::ReliableSenderHandle;
+pub use handshake::HandshakeMessage;
+pub use heartbeat::HeartbeatMessage;
+pub use ping::PingMessage;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum Message {

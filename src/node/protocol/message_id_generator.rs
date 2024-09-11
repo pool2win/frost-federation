@@ -19,25 +19,31 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::SystemTime;
 
+use serde::{Deserialize, Serialize};
+
+#[derive(PartialEq, Debug, Eq, Hash, Clone, Serialize, Deserialize)]
+pub struct MessageId(pub u64);
+
 /// Calculate a simple u64 hash from string
 ///
 /// Use the DefaultHasher provided with std for now.
-fn calculate_hash<T: Hash>(t: &T) -> u64 {
+fn calculate_hash<T: Hash>(t: &T) -> MessageId {
     let mut s = DefaultHasher::new();
     t.hash(&mut s);
-    s.finish()
+    MessageId(s.finish())
 }
 
 /// A Message ID generator based on node id and local time
 ///
 /// Use a simple Hash and DefaultHasher provided by std
+#[derive(Clone, Debug)]
 pub struct MessageIdGenerator {
     node_id: String,
 }
 
 impl MessageIdGenerator {
     /// Build a new id generator for the given node id
-    fn new(node_id: String) -> Self {
+    pub fn new(node_id: String) -> Self {
         Self { node_id }
     }
 
@@ -45,7 +51,7 @@ impl MessageIdGenerator {
     ///
     /// Get local time in nano seconds
     /// Concatenate the node_id to the time
-    pub fn next(&self) -> u64 {
+    pub fn next(&self) -> MessageId {
         let mut current_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
@@ -58,12 +64,12 @@ impl MessageIdGenerator {
 
 #[cfg(test)]
 mod message_id_generator_tests {
-    use super::MessageIdGenerator;
+    use super::{MessageId, MessageIdGenerator};
 
     #[test]
     fn it_generates_ids() {
         let gen = MessageIdGenerator::new("some node id".to_string());
-        assert_ne!(gen.next(), 0);
+        assert_ne!(gen.next(), MessageId(0));
         assert_ne!(gen.next(), gen.next());
     }
 }
