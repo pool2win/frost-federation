@@ -26,7 +26,6 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::error::Elapsed;
 use tokio::time::timeout;
 
 type EchosMap = HashMap<MessageId, HashMap<String, bool>>;
@@ -206,17 +205,6 @@ impl EchoBroadcastHandle {
         } else {
             Ok(())
         }
-    }
-}
-
-mockall::mock! {
-    #[derive(Debug)]
-    pub EchoBroadcastHandle {
-        pub fn start(delivery_timeout: u64, reliable_senders_map:ReliableSenderMap) -> Self;
-        pub async fn send(&self, message: Message) -> Result<(), Box<dyn Error>>;
-    }
-    impl Clone for EchoBroadcastHandle {
-        fn clone(&self) -> Self;
     }
 }
 
