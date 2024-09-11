@@ -1,7 +1,7 @@
 default: test
 
 test:
-	cargo test
+	RUST_LOG=debug cargo test
 
 build:
 	cargo build
