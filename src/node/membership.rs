@@ -34,15 +34,13 @@ pub enum MembershipMessage {
 pub(crate) struct MembershipActor {
     members: ReliableSenderMap,
     receiver: mpsc::Receiver<MembershipMessage>,
-    delivery_timeout: u64,
 }
 
 impl MembershipActor {
-    pub fn start(receiver: mpsc::Receiver<MembershipMessage>, delivery_timeout: u64) -> Self {
+    pub fn start(receiver: mpsc::Receiver<MembershipMessage>) -> Self {
         Self {
             members: HashMap::default(),
             receiver,
-            delivery_timeout,
         }
     }
 
@@ -90,9 +88,9 @@ pub(crate) struct MembershipHandle {
 }
 
 impl MembershipHandle {
-    pub async fn start(delivery_timeout: u64, node_id: String) -> Self {
+    pub async fn start(node_id: String) -> Self {
         let (sender, receiver) = mpsc::channel(32);
-        let actor = MembershipActor::start(receiver, delivery_timeout);
+        let actor = MembershipActor::start(receiver);
         tokio::spawn(run_membership_actor(actor));
         Self { sender }
     }
@@ -150,7 +148,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_should_create_membership_add_and_remove_members() {
-        let membership_handle = MembershipHandle::start(500, "localhost".to_string()).await;
+        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
         let reliable_sender_handle = ReliableSenderHandle::default();
         let reliable_sender_handle_2 = ReliableSenderHandle::default();
 
@@ -170,7 +168,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_should_result_in_error_when_removing_non_member() {
-        let membership_handle = MembershipHandle::start(500, "localhost".to_string()).await;
+        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
 
         assert!(membership_handle
             .remove_member("localhost22".to_string())
@@ -180,7 +178,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_should_return_members_as_empty_vec() {
-        let membership_handle = MembershipHandle::start(500, "localhost".to_string()).await;
+        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
 
         let reliable_senders = membership_handle.get_members().await;
         assert!(reliable_senders.unwrap().is_empty());
@@ -188,7 +186,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_should_return_members_as_vec() {
-        let membership_handle = MembershipHandle::start(500, "localhost".to_string()).await;
+        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
         let mut reliable_sender_handle = ReliableSenderHandle::default();
         reliable_sender_handle
             .expect_clone()

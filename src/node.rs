@@ -58,7 +58,7 @@ impl Node {
             bind_address: bind_address.clone(),
             static_key_pem: String::new(),
             delivery_timeout: 500,
-            membership_handle: MembershipHandle::start(500, bind_address).await,
+            membership_handle: MembershipHandle::start(bind_address).await,
         }
     }
 
