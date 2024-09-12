@@ -104,6 +104,7 @@ impl EchoBroadcastActor {
             let details = self.echos.entry(message_id.clone()).or_default();
             details.entry(member.clone()).or_insert(false);
         }
+
         // Update sender_id's echo to true
         self.echos
             .get_mut(&message_id)
@@ -127,7 +128,10 @@ impl EchoBroadcastActor {
     pub fn add_echo(&mut self, message_id: &MessageId, sender_id: String) {
         match self.echos.get_mut(message_id) {
             Some(echos) => {
-                echos.entry(sender_id).or_insert(true);
+                echos
+                    .entry(sender_id)
+                    .and_modify(|v| *v = true)
+                    .or_insert(true);
             }
             None => {
                 self.echos.insert(
@@ -141,6 +145,7 @@ impl EchoBroadcastActor {
     /// Handle Echo messages received for this message
     pub async fn handle_received_echo(&mut self, data: Message, message_id: MessageId) {
         let sender_id = data.get_sender_id();
+
         self.add_echo(&message_id, sender_id.clone());
 
         if self.echo_received_for_all(&message_id) {
@@ -381,7 +386,7 @@ mod echo_broadcast_actor_tests {
             .return_once(|_| Ok(()));
         second_reliable_sender_handle
             .expect_send()
-            .return_once(|_| Err("Error sending message".into()));
+            .return_once(|_| Ok(()));
 
         let reliable_senders_map = HashMap::from([
             ("a".to_string(), first_reliable_sender_handle),
@@ -409,6 +414,8 @@ mod echo_broadcast_actor_tests {
 
     #[tokio::test]
     async fn it_should_add_echo_in_various_cases() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut first_reliable_sender_handle = ReliableSenderHandle::default();
         let mut second_reliable_sender_handle = ReliableSenderHandle::default();
 
@@ -417,7 +424,38 @@ mod echo_broadcast_actor_tests {
             .return_once(|_| Ok(()));
         second_reliable_sender_handle
             .expect_send()
-            .return_once(|_| Err("Error sending message".into()));
+            .return_once(|_| Ok(()));
+
+        let reliable_senders_map = HashMap::from([
+            ("b".to_string(), first_reliable_sender_handle),
+            ("c".to_string(), second_reliable_sender_handle),
+        ]);
+
+        let (_sender, receiver) = mpsc::channel(32);
+        let mut echo_bcast_actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
+
+        echo_bcast_actor.add_echo(&MessageId(1), "b".to_string());
+        echo_bcast_actor.add_echo(&MessageId(1), "c".to_string());
+
+        assert_eq!(echo_bcast_actor.echos.len(), 1);
+        assert_eq!(echo_bcast_actor.echos.get(&MessageId(1)).unwrap().len(), 2);
+
+        // try to add same echo again
+        echo_bcast_actor.add_echo(&MessageId(1), "b".to_string());
+        assert_eq!(echo_bcast_actor.echos.get(&MessageId(1)).unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn it_should_handle_echo_before_all_received_will_add_echo() {
+        let mut first_reliable_sender_handle = ReliableSenderHandle::default();
+        let mut second_reliable_sender_handle = ReliableSenderHandle::default();
+
+        first_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| Ok(()));
+        second_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| Ok(()));
 
         let reliable_senders_map = HashMap::from([
             ("a".to_string(), first_reliable_sender_handle),
@@ -427,17 +465,56 @@ mod echo_broadcast_actor_tests {
         let (_sender, receiver) = mpsc::channel(32);
         let mut echo_bcast_actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
 
-        echo_bcast_actor.add_echo(&MessageId(1), "a".to_string());
-        echo_bcast_actor.add_echo(&MessageId(2), "b".to_string());
+        let ping_msg = PingMessage::start("a").unwrap();
+        echo_bcast_actor
+            .handle_received_echo(ping_msg, MessageId(1))
+            .await;
 
-        assert_eq!(echo_bcast_actor.echos.len(), 2);
+        assert_eq!(echo_bcast_actor.echos.len(), 1);
         assert_eq!(echo_bcast_actor.echos.get(&MessageId(1)).unwrap().len(), 1);
-        assert_eq!(echo_bcast_actor.echos.get(&MessageId(2)).unwrap().len(), 1);
+    }
 
-        // try to add same echo again
-        echo_bcast_actor.add_echo(&MessageId(1), "a".to_string());
-        assert_eq!(echo_bcast_actor.echos.len(), 2);
-        assert_eq!(echo_bcast_actor.echos.get(&MessageId(1)).unwrap().len(), 1);
-        assert_eq!(echo_bcast_actor.echos.get(&MessageId(2)).unwrap().len(), 1);
+    #[tokio::test]
+    async fn it_should_handle_echo_to_manage_all_received_case() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        let mut first_reliable_sender_handle = ReliableSenderHandle::default();
+        let mut second_reliable_sender_handle = ReliableSenderHandle::default();
+
+        first_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| Ok(()));
+        second_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| Ok(()));
+
+        let reliable_senders_map = HashMap::from([
+            ("b".to_string(), first_reliable_sender_handle),
+            ("c".to_string(), second_reliable_sender_handle),
+        ]);
+
+        let (_sender, receiver) = mpsc::channel(32);
+        let (msg_sender, msg_receiver) = oneshot::channel();
+        let mut echo_bcast_actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
+
+        let ping_msg = PingMessage::start("a").unwrap();
+        let result = echo_bcast_actor
+            .send_message(ping_msg.clone(), MessageId(1), msg_sender)
+            .await;
+
+        assert!(result.is_ok());
+        assert_eq!(echo_bcast_actor.responders.len(), 1);
+
+        let first_echo_response = ping_msg.response_for_received("b").unwrap().unwrap();
+        echo_bcast_actor
+            .handle_received_echo(first_echo_response, MessageId(1))
+            .await;
+
+        let second_echo_response = ping_msg.response_for_received("c").unwrap().unwrap();
+        echo_bcast_actor
+            .handle_received_echo(second_echo_response, MessageId(1))
+            .await;
+
+        assert!(msg_receiver.await.is_ok());
     }
 }
