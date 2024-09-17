@@ -1,0 +1,38 @@
+
+= FROST Robust KeyGen Using BFT Broadcast
+
+We are using the FROST KeyGen protocol described in the FROST
+paper. The lack of agreement in the second round has been
+https://github.com/ZcashFoundation/frost/issues/577[identified as a
+weakness] and we address the weakness by using a byzantine fault
+tolerant reliable broadcast.
+
+== Goals
+
+. Robustness - we need federations to stay up and make progress, as long as a threshold number of parties are working correctly.
+. Threshold - we require that only a threshold t < n/3 of parties can fail. We require an honest majority to make progress. If more parties fail, the federation disbands and all parties can unilaterally exit from their contracts.
+. No coordinator - We require there is not coordinator as this party can be DDoSed in an online setting.
+
+== Proposed Solution
+
+We don't go through the entire KeyGen protocol here as that will
+probably result in an error :) Instead, we only highlight how we use a
+BFT reliable broadcast in the second round of KeyGen.
+
+We use https://dl.acm.org/doi/10.1145/800222.806743[Bracha's echo
+broadcast] to allow all parties to be sure at least a threshold number
+of parties have received the same shares from all other parties.
+
+This is how we can use Bracha's protocol during round 2 of FROST
+KeyGen. We add a new step 1.1 right after step 1 of round 2 of FROST
+KeyGen.
+
+The new step 1.1 requires that
+
+. Each party reliably broadcasts a hash of their secret share (l, f_i(l)) using Bracha's protocol.
+. Each party validates that secret shares they have received from t parties have been acknowledged by t parties by comparing the hash of the secret share they received with the hashes broadcast in 1.
+.. Note: t < n/3 here.
+. Continue to step 2 of round 2 from FROST KeyGen.
+
+
+
