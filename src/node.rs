@@ -17,12 +17,14 @@
 // <https://www.gnu.org/licenses/>.
 
 use self::{
-    membership::MembershipHandle, protocol::HandshakeMessage,
+    membership::{AddMember, GetMembers, Membership, RemoveMember},
+    protocol::HandshakeMessage,
     reliable_sender::ReliableNetworkMessage,
 };
 use crate::node::noise_handler::{NoiseHandler, NoiseIO};
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
+use actix::Actor;
 #[mockall_double::double]
 use connection::ConnectionHandle;
 use tokio::{
@@ -46,7 +48,7 @@ pub struct Node {
     pub bind_address: String,
     pub static_key_pem: String,
     pub delivery_timeout: u64,
-    pub membership_handle: MembershipHandle,
+    pub membership_addr: actix::Addr<Membership>,
 }
 
 impl Node {
@@ -58,7 +60,7 @@ impl Node {
             bind_address: bind_address.clone(),
             static_key_pem: String::new(),
             delivery_timeout: 500,
-            membership_handle: MembershipHandle::start(bind_address).await,
+            membership_addr: Membership::default().start(),
         }
     }
 
@@ -151,8 +153,11 @@ impl Node {
                 )
                 .await;
             if self
-                .membership_handle
-                .add_member(socket_addr.to_string(), reliable_sender_handle.clone())
+                .membership_addr
+                .send(AddMember {
+                    member: socket_addr.to_string(),
+                    handler: reliable_sender_handle.clone(),
+                })
                 .await
                 .is_err()
             {
@@ -187,8 +192,11 @@ impl Node {
                     )
                     .await;
                 if self
-                    .membership_handle
-                    .add_member(peer_addr.to_string(), reliable_sender_handle)
+                    .membership_addr
+                    .send(AddMember {
+                        member: peer_addr.to_string(),
+                        handler: reliable_sender_handle,
+                    })
                     .await
                     .is_err()
                 {
@@ -213,7 +221,7 @@ impl Node {
         )
         .await;
         let cloned = reliable_sender_handle.clone();
-        let membership_handle = self.membership_handle.clone();
+        let membership_addr = self.membership_addr.clone();
 
         let node_id = self.get_node_id();
         tokio::spawn(async move {
@@ -233,17 +241,17 @@ impl Node {
                 }
             }
             log::debug!("Connection clean up");
-            let _ = membership_handle.remove_member(addr).await;
+            let _ = membership_addr.send(RemoveMember { member: addr }).await;
         });
         reliable_sender_handle
     }
 }
 
 #[cfg(test)]
-mod tests {
+mod node_tests {
     use super::Node;
 
-    #[tokio::test]
+    #[actix::test]
     async fn it_should_return_well_formed_node_id() {
         let node = Node::new().await;
         assert_eq!(node.get_node_id(), "localhost");
