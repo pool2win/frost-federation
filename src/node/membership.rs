@@ -18,184 +18,169 @@
 
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
+use actix::prelude as actix;
 use std::collections::HashMap;
-use std::error::Error;
-use tokio::sync::{mpsc, oneshot};
 
 pub type ReliableSenderMap = HashMap<String, ReliableSenderHandle>;
 
-pub enum MembershipMessage {
-    Add(String, ReliableSenderHandle, oneshot::Sender<()>),
-    Remove(String, oneshot::Sender<Option<ReliableSenderHandle>>),
-    GetMembers(oneshot::Sender<ReliableSenderMap>),
+pub(crate) struct AddMember {
+    pub(crate) member: String,
+    pub(crate) handler: ReliableSenderHandle,
 }
 
-#[derive(Debug)]
-pub(crate) struct MembershipActor {
+pub(crate) struct RemoveMember {
+    pub(crate) member: String,
+}
+
+pub(crate) struct GetMembers;
+
+impl actix::Message for AddMember {
+    type Result = Result<(), std::io::Error>;
+}
+
+impl actix::Message for RemoveMember {
+    type Result = Result<(), std::io::Error>;
+}
+
+impl actix::Message for GetMembers {
+    type Result = Result<ReliableSenderMap, std::io::Error>;
+}
+
+pub(crate) struct Membership {
     members: ReliableSenderMap,
-    receiver: mpsc::Receiver<MembershipMessage>,
 }
 
-impl MembershipActor {
-    pub fn start(receiver: mpsc::Receiver<MembershipMessage>) -> Self {
-        Self {
-            members: HashMap::default(),
-            receiver,
+impl Default for Membership {
+    fn default() -> Self {
+        Membership {
+            members: HashMap::new(),
         }
     }
+}
 
-    pub fn add_member(
+impl actix::Actor for Membership {
+    type Context = actix::Context<Self>;
+
+    fn started(&mut self, _ctx: &mut actix::Context<Self>) {
+        self.members = HashMap::new();
+        log::debug!("Membership Actor is alive");
+    }
+}
+
+impl actix::Handler<AddMember> for Membership {
+    type Result = Result<(), std::io::Error>;
+
+    fn handle(
         &mut self,
-        node_id: String,
-        handle: ReliableSenderHandle,
-        respond_to: oneshot::Sender<()>,
-    ) {
-        self.members.insert(node_id, handle);
-        let _ = respond_to.send(());
+        msg: AddMember,
+        _ctx: &mut actix::Context<Self>,
+    ) -> Result<(), std::io::Error> {
+        self.members.insert(msg.member, msg.handler);
+        Ok(())
     }
+}
 
-    pub fn remove_member(
+impl actix::Handler<RemoveMember> for Membership {
+    type Result = Result<(), std::io::Error>;
+
+    fn handle(
         &mut self,
-        node_id: String,
-        respond_to: oneshot::Sender<Option<ReliableSenderHandle>>,
-    ) {
-        let removed = self.members.remove(&node_id);
-        let _ = respond_to.send(removed);
-    }
-
-    pub fn get_members(&self, respond_to: oneshot::Sender<ReliableSenderMap>) {
-        let _ = respond_to.send(self.members.clone());
-    }
-}
-
-pub async fn run_membership_actor(mut actor: MembershipActor) {
-    while let Some(message) = actor.receiver.recv().await {
-        match message {
-            MembershipMessage::Add(node_id, handle, respond_to) => {
-                actor.add_member(node_id, handle, respond_to)
-            }
-            MembershipMessage::Remove(node_id, respond_to) => {
-                actor.remove_member(node_id, respond_to)
-            }
-            MembershipMessage::GetMembers(respond_to) => actor.get_members(respond_to),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct MembershipHandle {
-    sender: mpsc::Sender<MembershipMessage>,
-}
-
-impl MembershipHandle {
-    pub async fn start(node_id: String) -> Self {
-        let (sender, receiver) = mpsc::channel(32);
-        let actor = MembershipActor::start(receiver);
-        tokio::spawn(run_membership_actor(actor));
-        Self { sender }
-    }
-
-    pub async fn add_member(
-        &self,
-        member: String,
-        handle: ReliableSenderHandle,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let (respond_to, receiver) = oneshot::channel();
-        let msg = MembershipMessage::Add(member.clone(), handle, respond_to);
-        let _ = self.sender.send(msg).await;
-        match receiver.await {
-            Err(_) => Err("Error adding member".into()),
-            Ok(_) => {
-                log::info!("New member added: {}", member);
-                Ok(())
-            }
-        }
-    }
-
-    pub async fn remove_member(&self, member: String) -> Result<(), Box<dyn std::error::Error>> {
-        let (respond_to, receiver) = oneshot::channel();
-        let msg = MembershipMessage::Remove(member, respond_to);
-        let _ = self.sender.send(msg).await;
-        let response = receiver.await.unwrap();
-        if response.is_some() {
-            Ok(())
+        msg: RemoveMember,
+        _ctx: &mut actix::Context<Self>,
+    ) -> Result<(), std::io::Error> {
+        if self.members.remove(&msg.member).is_none() {
+            Err(std::io::Error::other("No such member"))
         } else {
-            Err("Error removing member".into())
+            Ok(())
         }
     }
+}
 
-    pub async fn get_members(&self) -> Result<ReliableSenderMap, Box<dyn Error>> {
-        let (respond_to, receiver) = oneshot::channel();
-        if self
-            .sender
-            .send(MembershipMessage::GetMembers(respond_to))
-            .await
-            .is_err()
-        {
-            return Err("Error sending request to get members".into());
-        }
-        match receiver.await {
-            Err(_) => Err("Error reading membership".into()),
-            Ok(result) => Ok(result),
-        }
+impl actix::Handler<GetMembers> for Membership {
+    type Result = Result<ReliableSenderMap, std::io::Error>;
+
+    fn handle(
+        &mut self,
+        _msg: GetMembers,
+        _ctx: &mut actix::Context<Self>,
+    ) -> Result<ReliableSenderMap, std::io::Error> {
+        Ok(self.members.clone())
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::node::protocol::{PingMessage, ProtocolMessage};
+mod membership_tests {
+    use ::actix::prelude as actix;
+    use actix::Actor;
 
-    #[tokio::test]
+    use super::*;
+    #[mockall_double::double]
+    use crate::node::reliable_sender::ReliableSenderHandle;
+
+    #[::actix::test]
     async fn it_should_create_membership_add_and_remove_members() {
-        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
+        let membership_addr = Membership::default().start();
         let reliable_sender_handle = ReliableSenderHandle::default();
         let reliable_sender_handle_2 = ReliableSenderHandle::default();
 
-        let _ = membership_handle
-            .add_member("localhost".to_string(), reliable_sender_handle)
+        let _ = membership_addr
+            .send(AddMember {
+                member: "localhost".to_string(),
+                handler: reliable_sender_handle,
+            })
             .await;
 
-        let _ = membership_handle
-            .add_member("localhost2".to_string(), reliable_sender_handle_2)
+        let _ = membership_addr
+            .send(AddMember {
+                member: "localhost2".to_string(),
+                handler: reliable_sender_handle_2,
+            })
             .await;
 
-        assert!(membership_handle
-            .remove_member("localhost".to_string())
+        assert!(membership_addr
+            .send(RemoveMember {
+                member: "localhost".to_string()
+            })
             .await
             .is_ok());
     }
 
-    #[tokio::test]
+    #[::actix::test]
     async fn it_should_result_in_error_when_removing_non_member() {
-        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
+        let _ = env_logger::builder().is_test(true).try_init();
+        let membership_addr = Membership::default().start();
 
-        assert!(membership_handle
-            .remove_member("localhost22".to_string())
-            .await
-            .is_err());
+        let res = membership_addr
+            .send(RemoveMember {
+                member: "localhost22".to_string(),
+            })
+            .await;
+        assert!(res.unwrap().is_err());
     }
 
-    #[tokio::test]
+    #[::actix::test]
     async fn it_should_return_members_as_empty_vec() {
-        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
+        let membership_addr = Membership::default().start();
 
-        let reliable_senders = membership_handle.get_members().await;
-        assert!(reliable_senders.unwrap().is_empty());
+        let reliable_senders = membership_addr.send(GetMembers {}).await;
+        assert!(reliable_senders.unwrap().unwrap().is_empty());
     }
 
-    #[tokio::test]
+    #[::actix::test]
     async fn it_should_return_members_as_vec() {
-        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
+        let membership_addr = Membership::default().start();
         let mut reliable_sender_handle = ReliableSenderHandle::default();
         reliable_sender_handle
             .expect_clone()
             .returning(ReliableSenderHandle::default);
-        let _ = membership_handle
-            .add_member("localhost".to_string(), reliable_sender_handle)
+        let _ = membership_addr
+            .send(AddMember {
+                member: "localhost".to_string(),
+                handler: reliable_sender_handle,
+            })
             .await;
 
-        let reliable_senders = membership_handle.get_members().await;
-        assert_eq!(reliable_senders.unwrap().len(), 1);
+        let reliable_senders = membership_addr.send(GetMembers).await;
+        assert_eq!(reliable_senders.unwrap().unwrap().len(), 1);
     }
 }
