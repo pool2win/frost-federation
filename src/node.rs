@@ -17,7 +17,7 @@
 // <https://www.gnu.org/licenses/>.
 
 use self::{
-    membership::{AddMember, GetMembers, Membership, RemoveMember},
+    membership::{AddMember, Membership, RemoveMember},
     protocol::HandshakeMessage,
     reliable_sender::ReliableNetworkMessage,
 };

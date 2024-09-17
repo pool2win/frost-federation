@@ -25,7 +25,7 @@ mod cli;
 mod config;
 mod node;
 
-#[tokio::main]
+#[actix::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = cli::Cli::parse();
 
