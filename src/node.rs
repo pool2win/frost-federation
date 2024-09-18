@@ -248,12 +248,32 @@ impl Node {
 }
 
 #[cfg(test)]
-mod tests {
+mod node_tests {
     use super::Node;
 
     #[tokio::test]
     async fn it_should_return_well_formed_node_id() {
         let node = Node::new().await;
         assert_eq!(node.get_node_id(), "localhost");
+    }
+
+    #[tokio::test]
+    async fn it_should_create_nodew_with_config() {
+        let node = Node::new()
+            .await
+            .seeds(vec![
+                "localhost:6881".to_string(),
+                "localhost:6882".to_string(),
+            ])
+            .bind_address("localhost:6880".to_string())
+            .static_key_pem("a key".to_string())
+            .delivery_timeout(1000);
+
+        assert_eq!(node.get_node_id(), "localhost:6880");
+        assert_eq!(node.bind_address, "localhost:6880");
+        assert_eq!(node.seeds[0], "localhost:6881");
+        assert_eq!(node.seeds[1], "localhost:6882");
+        assert_eq!(node.static_key_pem, "a key");
+        assert_eq!(node.delivery_timeout, 1000);
     }
 }
