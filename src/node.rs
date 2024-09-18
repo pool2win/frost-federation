@@ -25,6 +25,7 @@ use crate::node::noise_handler::{NoiseHandler, NoiseIO};
 use crate::node::reliable_sender::ReliableSenderHandle;
 #[mockall_double::double]
 use connection::ConnectionHandle;
+use std::error::Error;
 use tokio::{
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
@@ -95,19 +96,24 @@ impl Node {
     }
 
     /// Start node by listening, accepting and connecting to peers
-    pub async fn start(&mut self) {
+    pub async fn start(&mut self) -> Result<(), Box<dyn Error>> {
         log::debug!("Starting...");
-        self.connect_to_seeds().await;
+        if self.connect_to_seeds().await.is_err() {
+            return Err("Connecting to seeds failed.".into());
+        }
         let listener = self.listen().await;
-        self.start_accept(listener).await;
+        if listener.is_err() {
+            return Err("Error starting listen".into());
+        } else {
+            self.start_accept(listener.unwrap()).await;
+        }
+        Ok(())
     }
 
     /// Start listening
-    pub async fn listen(&mut self) -> TcpListener {
+    pub async fn listen(&mut self) -> Result<TcpListener, Box<dyn Error>> {
         log::debug!("Start listen...");
-        TcpListener::bind(self.bind_address.to_string())
-            .await
-            .unwrap()
+        Ok(TcpListener::bind(self.bind_address.to_string()).await?)
     }
 
     pub fn build_reader_writer(
@@ -166,7 +172,7 @@ impl Node {
     }
 
     /// Connect to all peers and start reader writer tasks
-    pub async fn connect_to_seeds(&mut self) {
+    pub async fn connect_to_seeds(&mut self) -> Result<(), Box<dyn Error>> {
         log::debug!("Connecting to seeds...");
         let seeds = self.seeds.clone();
         let init = false;
@@ -192,12 +198,14 @@ impl Node {
                     .await
                     .is_err()
                 {
-                    log::debug!("Error adding new connection to membership. Stopping.");
+                    return Err("Error adding new connection to membership. Stopping.".into());
                 }
             } else {
                 log::debug!("Failed to connect to seed {}", seed);
+                return Err("Failed to connect to seed".into());
             }
         }
+        Ok(())
     }
 
     pub async fn start_reliable_sender_receiver(
