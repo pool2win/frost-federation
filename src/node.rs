@@ -276,4 +276,13 @@ mod node_tests {
         assert_eq!(node.static_key_pem, "a key");
         assert_eq!(node.delivery_timeout, 1000);
     }
+
+    #[tokio::test]
+    async fn it_should_start_listen_without_error() {
+        mockall::mock! {
+            TcpListener{}
+        }
+        let mut node = Node::new().await.bind_address("localhost:6880".to_string());
+        assert!(node.listen().await.is_ok());
+    }
 }
