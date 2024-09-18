@@ -48,7 +48,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .static_key_pem(config.noise.key)
         .delivery_timeout(config.peer.delivery_timeout);
 
-    node.start().await;
+    if node.start().await.is_err() {
+        return Err("Stopping node".into());
+    }
     Ok(())
 }
 
