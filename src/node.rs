@@ -23,6 +23,7 @@ use self::{
 use crate::node::noise_handler::{NoiseHandler, NoiseIO};
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
+use crate::node::state::State;
 #[mockall_double::double]
 use connection::ConnectionHandle;
 use std::error::Error;
@@ -41,13 +42,14 @@ mod membership;
 mod noise_handler;
 mod protocol;
 mod reliable_sender;
+mod state;
 
 pub struct Node {
     pub seeds: Vec<String>,
     pub bind_address: String,
     pub static_key_pem: String,
     pub delivery_timeout: u64,
-    pub membership_handle: MembershipHandle,
+    pub state: State,
 }
 
 impl Node {
@@ -59,7 +61,9 @@ impl Node {
             bind_address: bind_address.clone(),
             static_key_pem: String::new(),
             delivery_timeout: 500,
-            membership_handle: MembershipHandle::start(bind_address).await,
+            state: State {
+                membership_handle: MembershipHandle::start(bind_address).await,
+            },
         }
     }
 
@@ -157,6 +161,7 @@ impl Node {
                 )
                 .await;
             if self
+                .state
                 .membership_handle
                 .add_member(socket_addr.to_string(), reliable_sender_handle.clone())
                 .await
@@ -193,6 +198,7 @@ impl Node {
                     )
                     .await;
                 if self
+                    .state
                     .membership_handle
                     .add_member(peer_addr.to_string(), reliable_sender_handle)
                     .await
@@ -221,7 +227,7 @@ impl Node {
         )
         .await;
         let cloned = reliable_sender_handle.clone();
-        let membership_handle = self.membership_handle.clone();
+        let membership_handle = self.state.membership_handle.clone();
 
         let node_id = self.get_node_id();
         tokio::spawn(async move {
