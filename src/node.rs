@@ -17,7 +17,8 @@
 // <https://www.gnu.org/licenses/>.
 
 use self::{
-    membership::MembershipHandle, protocol::HandshakeMessage,
+    membership::MembershipHandle,
+    protocol::{HandshakeMessage, Message},
     reliable_sender::ReliableNetworkMessage,
 };
 use crate::node::noise_handler::{NoiseHandler, NoiseIO};
@@ -144,20 +145,23 @@ impl Node {
     /// Start accepting connections
     pub async fn start_accept(&mut self, listener: TcpListener) {
         log::debug!("Start accepting...");
-        let init = true;
+        let initiator = true;
         loop {
             log::debug!("Waiting on accept...");
             let (stream, socket_addr) = listener.accept().await.unwrap();
             log::info!("Accept connection from {}", socket_addr);
             let (reader, writer) = self.build_reader_writer(stream);
-            let noise = NoiseHandler::new(init, self.static_key_pem.clone());
+            let noise = NoiseHandler::new(initiator, self.static_key_pem.clone());
             let (connection_handle, connection_receiver) =
-                ConnectionHandle::start(reader, writer, noise, init).await;
-            let reliable_sender_handle = self
-                .start_reliable_sender_receiver(
-                    connection_handle,
-                    connection_receiver,
+                ConnectionHandle::start(reader, writer, noise, initiator).await;
+            let (reliable_sender_handle, application_receiver) = self
+                .start_reliable_sender_receiver(connection_handle, connection_receiver)
+                .await;
+            let _ = self
+                .start_application_event_loop(
                     socket_addr.to_string(),
+                    reliable_sender_handle.clone(),
+                    application_receiver,
                 )
                 .await;
             if self
@@ -190,11 +194,14 @@ impl Node {
                 let noise = NoiseHandler::new(init, self.static_key_pem.clone());
                 let (connection_handle, connection_receiver) =
                     ConnectionHandle::start(reader, writer, noise, init).await;
-                let reliable_sender_handle = self
-                    .start_reliable_sender_receiver(
-                        connection_handle,
-                        connection_receiver,
+                let (reliable_sender_handle, application_receiver) = self
+                    .start_reliable_sender_receiver(connection_handle, connection_receiver)
+                    .await;
+                let _ = self
+                    .start_application_event_loop(
                         peer_addr.to_string(),
+                        reliable_sender_handle.clone(),
+                        application_receiver,
                     )
                     .await;
                 if self
@@ -218,17 +225,23 @@ impl Node {
         &self,
         connection_handle: ConnectionHandle,
         connection_receiver: Receiver<ReliableNetworkMessage>,
-        addr: String,
-    ) -> ReliableSenderHandle {
-        let (reliable_sender_handle, mut application_receiver) = ReliableSenderHandle::start(
+    ) -> (ReliableSenderHandle, Receiver<Message>) {
+        let (reliable_sender_handle, application_receiver) = ReliableSenderHandle::start(
             connection_handle,
             connection_receiver,
             self.delivery_timeout,
         )
         .await;
-        let cloned = reliable_sender_handle.clone();
-        let membership_handle = self.state.membership_handle.clone();
+        (reliable_sender_handle, application_receiver)
+    }
 
+    pub async fn start_application_event_loop(
+        &self,
+        addr: String,
+        reliable_sender_handle: ReliableSenderHandle,
+        mut application_receiver: Receiver<Message>,
+    ) {
+        let membership_handle = self.state.membership_handle.clone();
         let node_id = self.get_node_id();
         tokio::spawn(async move {
             while let Some(message) = application_receiver.recv().await {
@@ -236,7 +249,7 @@ impl Node {
                 match message.response_for_received(&node_id) {
                     Ok(Some(response)) => {
                         log::debug!("Sending Response {:?}", response);
-                        let _ = cloned.send(response).await;
+                        let _ = reliable_sender_handle.send(response).await;
                     }
                     Ok(None) => {
                         log::info!("No response to send ")
@@ -249,7 +262,6 @@ impl Node {
             log::debug!("Connection clean up");
             let _ = membership_handle.remove_member(addr).await;
         });
-        reliable_sender_handle
     }
 }
 
