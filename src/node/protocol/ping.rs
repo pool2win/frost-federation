@@ -17,7 +17,11 @@
 // <https://www.gnu.org/licenses/>.
 
 use super::{Message, ProtocolMessage};
+use futures::{Future, FutureExt};
 use serde::{Deserialize, Serialize};
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use tower::{BoxError, Service};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct PingMessage {
@@ -45,10 +49,51 @@ impl ProtocolMessage for PingMessage {
     }
 }
 
-#[cfg(test)]
-mod tests {
+#[derive(Debug, Clone)]
+pub struct Ping {
+    sender_id: String,
+}
 
+/// Service for handling Ping protocol.
+///
+/// By making all protocol into a Service, we can use tower:Steer to
+/// multiplex across services.
+impl Service<Option<PingMessage>> for Ping {
+    type Response = Option<PingMessage>;
+    type Error = BoxError;
+    type Future = Pin<Box<dyn Future<Output = Result<Option<PingMessage>, BoxError>>>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, msg: Option<PingMessage>) -> Self::Future {
+        let sender_id = self.sender_id.clone();
+        async move {
+            match msg {
+                None => Ok(Some(PingMessage {
+                    message: "ping".to_string(),
+                    sender_id,
+                })),
+                Some(msg) => match msg.message.as_str() {
+                    "ping" => Ok(Some(PingMessage {
+                        message: "pong".to_string(),
+                        sender_id,
+                    })),
+                    _ => Ok(None),
+                },
+            }
+        }
+        .boxed()
+    }
+}
+
+#[cfg(test)]
+mod ping_tests {
+
+    use super::Ping;
     use crate::node::protocol::{Message, PingMessage, ProtocolMessage};
+    use tower::{Service, ServiceExt};
 
     #[test]
     fn it_matches_start_message_for_ping() {
@@ -71,5 +116,64 @@ mod tests {
                 message: "pong".to_string()
             })
         );
+    }
+
+    #[tokio::test]
+    async fn it_should_create_ping_as_service_and_respond_to_none_with_ping() {
+        let mut p = Ping {
+            sender_id: "local".to_string(),
+        };
+        let res = p.ready().await.unwrap().call(None).await.unwrap();
+        assert!(res.is_some());
+        assert_eq!(
+            res,
+            Some(PingMessage {
+                message: "ping".to_string(),
+                sender_id: "local".to_string()
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn it_should_create_ping_as_service_and_respond_to_ping_with_pong() {
+        let mut p = Ping {
+            sender_id: "local".to_string(),
+        };
+        let res = p
+            .ready()
+            .await
+            .unwrap()
+            .call(Some(PingMessage {
+                message: "ping".to_string(),
+                sender_id: "local".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert!(res.is_some());
+        assert_eq!(
+            res,
+            Some(PingMessage {
+                message: "pong".to_string(),
+                sender_id: "local".to_string()
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn it_should_create_ping_as_service_and_respond_to_pong_with_none() {
+        let mut p = Ping {
+            sender_id: "local".to_string(),
+        };
+        let res = p
+            .ready()
+            .await
+            .unwrap()
+            .call(Some(PingMessage {
+                message: "pong".to_string(),
+                sender_id: "local".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert!(res.is_none());
     }
 }

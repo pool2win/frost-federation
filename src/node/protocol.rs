@@ -27,9 +27,9 @@ mod ping;
 
 #[mockall_double::double]
 use super::reliable_sender::ReliableSenderHandle;
-pub use handshake::HandshakeMessage;
-pub use heartbeat::HeartbeatMessage;
-pub use ping::PingMessage;
+pub use handshake::{Handshake, HandshakeMessage};
+pub use heartbeat::{Heartbeat, HeartbeatMessage};
+pub use ping::{Ping, PingMessage};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum Message {
