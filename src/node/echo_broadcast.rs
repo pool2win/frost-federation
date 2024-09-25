@@ -18,7 +18,7 @@
 
 use super::connection::{ConnectionResult, ConnectionResultSender};
 use super::membership::ReliableSenderMap;
-use super::protocol::message_id_generator::{self, MessageId};
+use super::protocol::message_id_generator::MessageId;
 use crate::node::protocol::Message;
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;

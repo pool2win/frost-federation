@@ -17,9 +17,7 @@
 // <https://www.gnu.org/licenses/>.
 
 use self::{
-    membership::MembershipHandle,
-    protocol::{HandshakeMessage, Message},
-    reliable_sender::ReliableNetworkMessage,
+    membership::MembershipHandle, protocol::Message, reliable_sender::ReliableNetworkMessage,
 };
 use crate::node::noise_handler::{NoiseHandler, NoiseIO};
 #[mockall_double::double]
