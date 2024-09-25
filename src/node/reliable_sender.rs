@@ -249,7 +249,7 @@ impl ReliableSenderHandle {
 mod reliable_sender_tests {
     use super::ReliableNetworkMessage;
     use crate::node::connection::MockConnectionHandle;
-    use crate::node::protocol::{Message, PingMessage, ProtocolMessage};
+    use crate::node::protocol::{Message, PingMessage};
     use serde::Serialize;
     use tokio::sync::mpsc;
     use tokio_util::bytes::Bytes;
@@ -297,7 +297,10 @@ mod reliable_sender_tests {
         let (reliable_sender_handler, _application_receiver) =
             ReliableSenderHandle::start(mock_connection_handle, connection_receiver, 500).await;
 
-        let message = PingMessage::start("localhost").unwrap();
+        let message = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
+            message: "ping".to_string(),
+        });
 
         let ack_task = tokio::spawn(async move {
             let _ = connection_sender.send(ReliableNetworkMessage::Ack(1)).await;
@@ -318,7 +321,10 @@ mod reliable_sender_tests {
         let (reliable_sender_handler, _application_receiver) =
             ReliableSenderHandle::start(mock_connection_handle, connection_receiver, 500).await;
 
-        let message = PingMessage::start("localhost").unwrap();
+        let message = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
+            message: "ping".to_string(),
+        });
 
         let send_result = reliable_sender_handler.send(message).await;
         assert!(send_result.is_err());
@@ -333,7 +339,11 @@ mod reliable_sender_tests {
         let (_reliable_sender_handler, mut application_receiver) =
             ReliableSenderHandle::start(mock_connection_handle, connection_receiver, 500).await;
 
-        let message = PingMessage::start("localhost").unwrap();
+        let message = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
+            message: "ping".to_string(),
+        });
+
         let _ = connection_sender
             .send(ReliableNetworkMessage::Send(message.clone(), 1))
             .await;
@@ -353,7 +363,11 @@ mod reliable_sender_tests {
         let (_reliable_sender_handler, mut application_receiver) =
             ReliableSenderHandle::start(mock_connection_handle, connection_receiver, 500).await;
 
-        let message = PingMessage::start("localhost").unwrap();
+        let message = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
+            message: "ping".to_string(),
+        });
+
         let _ = connection_sender
             .send(ReliableNetworkMessage::Send(message.clone(), 1))
             .await;

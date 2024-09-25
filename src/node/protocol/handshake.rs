@@ -16,7 +16,7 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use super::{Message, ProtocolMessage};
+use crate::node::protocol::Message;
 use futures::{Future, FutureExt};
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
@@ -30,74 +30,51 @@ pub struct HandshakeMessage {
     pub version: String,
 }
 
-impl ProtocolMessage for HandshakeMessage {
-    fn start(node_id: &str) -> Option<Message> {
-        Some(Message::Handshake(HandshakeMessage {
-            sender_id: node_id.to_string(),
-            message: String::from("helo"),
-            version: String::from("0.1.0"),
-        }))
-    }
-
-    fn response_for_received(&self, id: &str) -> Result<Option<Message>, String> {
-        log::info!("Received {:?}", self);
-        match self {
-            HandshakeMessage {
-                sender_id: _,
-                message,
-                version,
-            } if message == "helo" && version == "0.1.0" => {
-                Ok(Some(Message::Handshake(HandshakeMessage {
-                    sender_id: id.to_string(),
-                    message: String::from("oleh"),
-                    version: String::from("0.1.0"),
-                })))
-            }
-            HandshakeMessage {
-                sender_id: _,
-                message,
-                version,
-            } if message == "oleh" && version == "0.1.0" => Ok(None),
-            _ => Err("Bad message".to_string()),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Handshake {
     sender_id: String,
+}
+
+impl Handshake {
+    pub fn new(node_id: String) -> Self {
+        Handshake { sender_id: node_id }
+    }
 }
 
 /// Service for handling Handshake protocol.
 ///
 /// By making all protocol into a Service, we can use tower:Steer to
 /// multiplex across services.
-impl Service<Option<HandshakeMessage>> for Handshake {
-    type Response = Option<HandshakeMessage>;
+impl Service<Option<Message>> for Handshake {
+    type Response = Option<Message>;
     type Error = BoxError;
-    type Future = Pin<Box<dyn Future<Output = Result<Option<HandshakeMessage>, BoxError>>>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Option<Message>, BoxError>> + Send>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, msg: Option<HandshakeMessage>) -> Self::Future {
-        let sender_id = self.sender_id.clone();
+    fn call(&mut self, msg: Option<Message>) -> Self::Future {
+        let local_sender_id = self.sender_id.clone();
         async move {
             match msg {
-                None => Ok(Some(HandshakeMessage {
-                    message: "helo".to_string(),
+                Some(Message::Handshake(HandshakeMessage {
+                    message,
                     sender_id,
-                    version: "0.1.0".to_string(),
-                })),
-                Some(msg) => match msg.message.as_str() {
-                    "helo" => Ok(Some(HandshakeMessage {
+                    version,
+                })) => match message.as_str() {
+                    "helo" => Ok(Some(Message::Handshake(HandshakeMessage {
                         message: "oleh".to_string(),
-                        sender_id,
+                        sender_id: local_sender_id,
                         version: "0.1.0".to_string(),
-                    })),
+                    }))),
                     _ => Ok(None),
                 },
+                _ => Ok(Some(Message::Handshake(HandshakeMessage {
+                    message: "helo".to_string(),
+                    sender_id: local_sender_id,
+                    version: "0.1.0".to_string(),
+                }))),
             }
         }
         .boxed()
@@ -106,59 +83,8 @@ impl Service<Option<HandshakeMessage>> for Handshake {
 
 #[cfg(test)]
 mod handshake_tests {
-    use crate::node::protocol::{Handshake, HandshakeMessage, Message, ProtocolMessage};
+    use crate::node::protocol::{Handshake, HandshakeMessage, Message};
     use tower::{Service, ServiceExt};
-
-    #[test]
-    fn it_matches_start_message_for_handshake() {
-        let start_message = HandshakeMessage::start("localhost".into()).unwrap();
-        assert_eq!(
-            start_message,
-            Message::Handshake(HandshakeMessage {
-                sender_id: "localhost".into(),
-                message: String::from("helo"),
-                version: String::from("0.1.0"),
-            })
-        );
-    }
-
-    #[test]
-    fn it_matches_response_message_for_correct_handshake_start() {
-        let start_message = HandshakeMessage::start("localhost".into()).unwrap();
-        let response = start_message.response_for_received("localhost").unwrap();
-        assert_eq!(
-            response,
-            Some(Message::Handshake(HandshakeMessage {
-                sender_id: "localhost".into(),
-                message: String::from("oleh"),
-                version: String::from("0.1.0"),
-            }))
-        );
-    }
-
-    #[test]
-    fn it_matches_error_response_message_for_incorrect_handshake_start() {
-        let start_message = Message::Handshake(HandshakeMessage {
-            sender_id: "localhost".into(),
-            message: String::from("bad-message"),
-            version: String::from("0.1.0"),
-        });
-
-        let response = start_message.response_for_received("localhost");
-        assert_eq!(response, Err("Bad message".to_string()));
-    }
-
-    #[test]
-    fn it_matches_error_response_message_for_incorrect_handshake_version() {
-        let start_message = Message::Handshake(HandshakeMessage {
-            sender_id: "localhost".into(),
-            message: String::from("helo"),
-            version: String::from("0.2.0"),
-        });
-
-        let response = start_message.response_for_received("localhost");
-        assert_eq!(response, Err("Bad message".to_string()));
-    }
 
     #[tokio::test]
     async fn it_should_create_ping_as_service_and_respond_to_none_with_handshake() {
@@ -169,11 +95,11 @@ mod handshake_tests {
         assert!(res.is_some());
         assert_eq!(
             res,
-            Some(HandshakeMessage {
+            Some(Message::Handshake(HandshakeMessage {
                 message: "helo".to_string(),
                 sender_id: "local".to_string(),
                 version: "0.1.0".to_string()
-            })
+            }))
         );
     }
 
@@ -186,21 +112,21 @@ mod handshake_tests {
             .ready()
             .await
             .unwrap()
-            .call(Some(HandshakeMessage {
+            .call(Some(Message::Handshake(HandshakeMessage {
                 message: "helo".to_string(),
                 sender_id: "local".to_string(),
                 version: "0.1.0".to_string(),
-            }))
+            })))
             .await
             .unwrap();
         assert!(res.is_some());
         assert_eq!(
             res,
-            Some(HandshakeMessage {
+            Some(Message::Handshake(HandshakeMessage {
                 message: "oleh".to_string(),
                 sender_id: "local".to_string(),
                 version: "0.1.0".to_string()
-            })
+            }))
         );
     }
 
@@ -213,11 +139,11 @@ mod handshake_tests {
             .ready()
             .await
             .unwrap()
-            .call(Some(HandshakeMessage {
+            .call(Some(Message::Handshake(HandshakeMessage {
                 message: "oleh".to_string(),
                 sender_id: "local".to_string(),
                 version: "0.1.0".to_string(),
-            }))
+            })))
             .await
             .unwrap();
         assert!(res.is_none());
