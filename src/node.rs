@@ -27,6 +27,7 @@ use crate::node::reliable_sender::ReliableSenderHandle;
 use crate::node::state::State;
 #[mockall_double::double]
 use connection::ConnectionHandle;
+use protocol::Handshake;
 use std::error::Error;
 use tokio::{
     net::{
@@ -36,6 +37,7 @@ use tokio::{
     sync::mpsc::Receiver,
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+use tower::{Service, ServiceBuilder, ServiceExt};
 
 mod connection;
 mod echo_broadcast;
@@ -158,7 +160,7 @@ impl Node {
                 .start_reliable_sender_receiver(connection_handle, connection_receiver)
                 .await;
             let _ = self
-                .start_application_event_loop(
+                .start_connection_event_loop(
                     socket_addr.to_string(),
                     reliable_sender_handle.clone(),
                     application_receiver,
@@ -176,7 +178,10 @@ impl Node {
             }
             let node_id = self.get_node_id();
             // Start the first protocol to start interaction between nodes
-            protocol::start_protocol::<HandshakeMessage>(reliable_sender_handle, &node_id).await;
+            let handshake_service = ServiceBuilder::new().service(Handshake::new(node_id));
+            let handshake_message = handshake_service.oneshot(None).await.unwrap().unwrap();
+            reliable_sender_handle.send(handshake_message).await;
+            //protocol::start_protocol::<HandshakeMessage>(reliable_sender_handle, &node_id).await;
         }
     }
 
@@ -198,7 +203,7 @@ impl Node {
                     .start_reliable_sender_receiver(connection_handle, connection_receiver)
                     .await;
                 let _ = self
-                    .start_application_event_loop(
+                    .start_connection_event_loop(
                         peer_addr.to_string(),
                         reliable_sender_handle.clone(),
                         application_receiver,
@@ -235,7 +240,7 @@ impl Node {
         (reliable_sender_handle, application_receiver)
     }
 
-    pub async fn start_application_event_loop(
+    pub async fn start_connection_event_loop(
         &self,
         addr: String,
         reliable_sender_handle: ReliableSenderHandle,
@@ -246,7 +251,9 @@ impl Node {
         tokio::spawn(async move {
             while let Some(message) = application_receiver.recv().await {
                 log::debug!("Application message received {:?}", message);
-                match message.response_for_received(&node_id) {
+                let mut service = protocol::service_for(&message, node_id.clone());
+                let response = service.call(Some(message)).await;
+                match response {
                     Ok(Some(response)) => {
                         log::debug!("Sending Response {:?}", response);
                         let _ = reliable_sender_handle.send(response).await;

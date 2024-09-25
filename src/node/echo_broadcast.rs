@@ -230,7 +230,9 @@ impl EchoBroadcastHandle {
 
 #[cfg(test)]
 mod echo_broadcast_handler_tests {
-    use crate::node::protocol::{HeartbeatMessage, ProtocolMessage};
+    use std::time::SystemTime;
+
+    use crate::node::protocol::HeartbeatMessage;
 
     use super::*;
 
@@ -248,7 +250,11 @@ mod echo_broadcast_handler_tests {
             reliable_senders_map,
         );
 
-        let message = HeartbeatMessage::start("localhost".into()).unwrap();
+        let message = Message::Heartbeat(HeartbeatMessage {
+            sender_id: "localhost".into(),
+            time: SystemTime::now(),
+        });
+
         let result = handle.send(message).await;
         assert!(result.is_err());
     }
@@ -256,9 +262,7 @@ mod echo_broadcast_handler_tests {
 
 #[cfg(test)]
 mod echo_broadcast_actor_tests {
-    use std::borrow::Borrow;
-
-    use crate::node::protocol::{PingMessage, ProtocolMessage};
+    use crate::node::protocol::PingMessage;
 
     use super::*;
 
@@ -284,7 +288,11 @@ mod echo_broadcast_actor_tests {
 
         let mut actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
 
-        let data = PingMessage::start("a").unwrap();
+        let data = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
+            message: "ping".to_string(),
+        });
+
         let result = actor.send_message(data, MessageId(0), respond_to).await;
         assert!(result.is_ok());
     }
@@ -303,7 +311,11 @@ mod echo_broadcast_actor_tests {
 
         let mut actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
 
-        let data = PingMessage::start("a").unwrap();
+        let data = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
+            message: "ping".to_string(),
+        });
+
         let result = actor.send_message(data, MessageId(0), respond_to).await;
         assert!(result.is_err());
     }
@@ -312,7 +324,11 @@ mod echo_broadcast_actor_tests {
     async fn it_should_send_handle_errors_if_echos_time_out() {
         let mut first_reliable_sender_handle = ReliableSenderHandle::default();
         let mut second_reliable_sender_handle = ReliableSenderHandle::default();
-        let msg = PingMessage::start("a").unwrap();
+
+        let msg = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
+            message: "ping".to_string(),
+        });
 
         first_reliable_sender_handle
             .expect_send()
@@ -346,7 +362,11 @@ mod echo_broadcast_actor_tests {
     async fn it_should_send_handle_errors_if_reliable_sender_returns_error() {
         let mut first_reliable_sender_handle = ReliableSenderHandle::default();
         let mut second_reliable_sender_handle = ReliableSenderHandle::default();
-        let msg = PingMessage::start("a").unwrap();
+
+        let msg = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
+            message: "ping".to_string(),
+        });
 
         first_reliable_sender_handle
             .expect_send()
@@ -395,7 +415,12 @@ mod echo_broadcast_actor_tests {
 
         let (_sender, receiver) = mpsc::channel(32);
         let mut echo_bcast_actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
-        let ping_msg = PingMessage::start("a").unwrap();
+
+        let ping_msg = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
+            message: "ping".to_string(),
+        });
+
         let msg = EchoBroadcastMessage::Echo {
             data: ping_msg,
             message_id: MessageId(1),
@@ -408,7 +433,7 @@ mod echo_broadcast_actor_tests {
             .echos
             .get(&MessageId(1))
             .unwrap()
-            .get("a")
+            .get("localhost")
             .is_some());
     }
 
@@ -465,7 +490,11 @@ mod echo_broadcast_actor_tests {
         let (_sender, receiver) = mpsc::channel(32);
         let mut echo_bcast_actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
 
-        let ping_msg = PingMessage::start("a").unwrap();
+        let ping_msg = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
+            message: "ping".to_string(),
+        });
+
         echo_bcast_actor
             .handle_received_echo(ping_msg, MessageId(1))
             .await;
@@ -497,7 +526,11 @@ mod echo_broadcast_actor_tests {
         let (msg_sender, msg_receiver) = oneshot::channel();
         let mut echo_bcast_actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
 
-        let ping_msg = PingMessage::start("a").unwrap();
+        let ping_msg = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
+            message: "ping".to_string(),
+        });
+
         let result = echo_bcast_actor
             .send_message(ping_msg.clone(), MessageId(1), msg_sender)
             .await;
@@ -505,14 +538,22 @@ mod echo_broadcast_actor_tests {
         assert!(result.is_ok());
         assert_eq!(echo_bcast_actor.responders.len(), 1);
 
-        let first_echo_response = ping_msg.response_for_received("b").unwrap().unwrap();
+        let echo_b = Message::Ping(PingMessage {
+            sender_id: "b".to_string(),
+            message: "ping".to_string(),
+        });
+
+        let echo_c = Message::Ping(PingMessage {
+            sender_id: "c".to_string(),
+            message: "ping".to_string(),
+        });
+
         echo_bcast_actor
-            .handle_received_echo(first_echo_response, MessageId(1))
+            .handle_received_echo(echo_b, MessageId(1))
             .await;
 
-        let second_echo_response = ping_msg.response_for_received("c").unwrap().unwrap();
         echo_bcast_actor
-            .handle_received_echo(second_echo_response, MessageId(1))
+            .handle_received_echo(echo_c, MessageId(1))
             .await;
 
         assert!(msg_receiver.await.is_ok());

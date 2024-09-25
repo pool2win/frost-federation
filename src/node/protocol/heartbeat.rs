@@ -15,7 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with Braidpool. If not, see <https://www.gnu.org/licenses/>.
 
-use super::{Message, ProtocolMessage};
+use super::Message;
 use futures::{Future, FutureExt};
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
@@ -29,46 +29,38 @@ pub struct HeartbeatMessage {
     pub time: SystemTime,
 }
 
-impl ProtocolMessage for HeartbeatMessage {
-    fn start(node_id: &str) -> Option<Message> {
-        Some(Message::Heartbeat(HeartbeatMessage {
-            sender_id: node_id.to_string(),
-            time: SystemTime::now(),
-        }))
-    }
-
-    fn response_for_received(&self, _id: &str) -> Result<Option<Message>, String> {
-        log::info!("Received {:?}", self);
-        Ok(None)
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Heartbeat {
     sender_id: String,
+}
+
+impl Heartbeat {
+    pub fn new(node_id: String) -> Self {
+        Heartbeat { sender_id: node_id }
+    }
 }
 
 /// Service for handling Heartbeat protocol.
 ///
 /// By making all protocol into a Service, we can use tower:Steer to
 /// multiplex across services.
-impl Service<Option<HeartbeatMessage>> for Heartbeat {
-    type Response = Option<HeartbeatMessage>;
+impl Service<Option<Message>> for Heartbeat {
+    type Response = Option<Message>;
     type Error = BoxError;
-    type Future = Pin<Box<dyn Future<Output = Result<Option<HeartbeatMessage>, BoxError>>>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Option<Message>, BoxError>> + Send>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, msg: Option<HeartbeatMessage>) -> Self::Future {
+    fn call(&mut self, msg: Option<Message>) -> Self::Future {
         let sender_id = self.sender_id.clone();
         async move {
             match msg {
-                None => Ok(Some(HeartbeatMessage {
+                None => Ok(Some(Message::Heartbeat(HeartbeatMessage {
                     time: SystemTime::now(),
                     sender_id,
-                })),
+                }))),
                 Some(_) => Ok(None),
             }
         }
@@ -79,33 +71,20 @@ impl Service<Option<HeartbeatMessage>> for Heartbeat {
 #[cfg(test)]
 mod heartbeat_tests {
 
-    use crate::node::protocol::{Heartbeat, HeartbeatMessage, Message, ProtocolMessage};
+    use crate::node::protocol::{Heartbeat, HeartbeatMessage, Message};
     use std::time::SystemTime;
     use tower::{Service, ServiceExt};
-
-    #[test]
-    fn it_matches_start_message_for_handshake() {
-        if let Some(Message::Heartbeat(start_message)) = HeartbeatMessage::start("localhost".into())
-        {
-            assert!(start_message.time < SystemTime::now());
-        }
-    }
-
-    #[test]
-    fn it_matches_response_message_for_correct_handshake_start() {
-        let start_message = HeartbeatMessage::start("localhost".into()).unwrap();
-        let response = start_message.response_for_received("localhost").unwrap();
-        assert_eq!(response, None);
-    }
 
     #[tokio::test]
     async fn it_should_create_ping_as_service_and_respond_to_none_with_handshake() {
         let mut p = Heartbeat {
             sender_id: "local".to_string(),
         };
-        let res = p.ready().await.unwrap().call(None).await.unwrap();
-        assert!(res.is_some());
-        assert_eq!(res.unwrap().sender_id, "local".to_string());
+        if let Some(Message::Heartbeat(msg)) = p.ready().await.unwrap().call(None).await.unwrap() {
+            assert_eq!(msg.sender_id, "local".to_string());
+        } else {
+            assert!(false, "Message not a ping message");
+        }
     }
 
     #[tokio::test]
@@ -117,10 +96,10 @@ mod heartbeat_tests {
             .ready()
             .await
             .unwrap()
-            .call(Some(HeartbeatMessage {
+            .call(Some(Message::Heartbeat(HeartbeatMessage {
                 sender_id: "local".to_string(),
                 time: SystemTime::now(),
-            }))
+            })))
             .await
             .unwrap();
         assert!(res.is_none());

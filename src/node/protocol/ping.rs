@@ -16,8 +16,8 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use super::{Message, ProtocolMessage};
-use futures::{Future, FutureExt};
+use crate::node::protocol::Message;
+use futures::Future;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -29,62 +29,47 @@ pub struct PingMessage {
     pub message: String,
 }
 
-impl ProtocolMessage for PingMessage {
-    fn start(node_id: &str) -> Option<Message> {
-        Some(Message::Ping(PingMessage {
-            sender_id: node_id.to_string(),
-            message: String::from("ping"),
-        }))
-    }
-
-    fn response_for_received(&self, id: &str) -> Result<Option<Message>, String> {
-        if self.message == "ping" {
-            Ok(Some(Message::Ping(PingMessage {
-                sender_id: id.to_string(),
-                message: String::from("pong"),
-            })))
-        } else {
-            Ok(None)
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Ping {
     sender_id: String,
+}
+
+impl Ping {
+    pub fn new(node_id: String) -> Self {
+        Ping { sender_id: node_id }
+    }
 }
 
 /// Service for handling Ping protocol.
 ///
 /// By making all protocol into a Service, we can use tower:Steer to
 /// multiplex across services.
-impl Service<Option<PingMessage>> for Ping {
-    type Response = Option<PingMessage>;
+impl Service<Option<Message>> for Ping {
+    type Response = Option<Message>;
     type Error = BoxError;
-    type Future = Pin<Box<dyn Future<Output = Result<Option<PingMessage>, BoxError>>>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Option<Message>, BoxError>> + Send>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, msg: Option<PingMessage>) -> Self::Future {
-        let sender_id = self.sender_id.clone();
-        async move {
+    fn call(&mut self, msg: Option<Message>) -> Self::Future {
+        let local_sender_id = self.sender_id.clone();
+        Box::pin(async move {
             match msg {
-                None => Ok(Some(PingMessage {
-                    message: "ping".to_string(),
-                    sender_id,
-                })),
-                Some(msg) => match msg.message.as_str() {
-                    "ping" => Ok(Some(PingMessage {
+                Some(Message::Ping(PingMessage { message, sender_id })) => match message.as_str() {
+                    "ping" => Ok(Some(Message::Ping(PingMessage {
                         message: "pong".to_string(),
-                        sender_id,
-                    })),
+                        sender_id: local_sender_id,
+                    }))),
                     _ => Ok(None),
                 },
+                _ => Ok(Some(Message::Ping(PingMessage {
+                    message: "ping".to_string(),
+                    sender_id: local_sender_id,
+                }))),
             }
-        }
-        .boxed()
+        })
     }
 }
 
@@ -92,31 +77,8 @@ impl Service<Option<PingMessage>> for Ping {
 mod ping_tests {
 
     use super::Ping;
-    use crate::node::protocol::{Message, PingMessage, ProtocolMessage};
+    use crate::node::protocol::{Message, PingMessage};
     use tower::{Service, ServiceExt};
-
-    #[test]
-    fn it_matches_start_message_for_ping() {
-        if let Some(Message::Ping(start_message)) = PingMessage::start("localhost".into()) {
-            assert_eq!(start_message.message, "ping".to_string());
-        }
-    }
-
-    #[test]
-    fn it_matches_response_message_for_correct_handshake_start() {
-        let start_message = PingMessage::start("localhost".into()).unwrap();
-        let response = start_message
-            .response_for_received("localhost")
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            response,
-            Message::Ping(PingMessage {
-                sender_id: "localhost".to_string(),
-                message: "pong".to_string()
-            })
-        );
-    }
 
     #[tokio::test]
     async fn it_should_create_ping_as_service_and_respond_to_none_with_ping() {
@@ -127,10 +89,10 @@ mod ping_tests {
         assert!(res.is_some());
         assert_eq!(
             res,
-            Some(PingMessage {
+            Some(Message::Ping(PingMessage {
                 message: "ping".to_string(),
                 sender_id: "local".to_string()
-            })
+            }))
         );
     }
 
@@ -143,19 +105,19 @@ mod ping_tests {
             .ready()
             .await
             .unwrap()
-            .call(Some(PingMessage {
+            .call(Some(Message::Ping(PingMessage {
                 message: "ping".to_string(),
                 sender_id: "local".to_string(),
-            }))
+            })))
             .await
             .unwrap();
         assert!(res.is_some());
         assert_eq!(
             res,
-            Some(PingMessage {
+            Some(Message::Ping(PingMessage {
                 message: "pong".to_string(),
                 sender_id: "local".to_string()
-            })
+            }))
         );
     }
 
@@ -168,10 +130,10 @@ mod ping_tests {
             .ready()
             .await
             .unwrap()
-            .call(Some(PingMessage {
+            .call(Some(Message::Ping(PingMessage {
                 message: "pong".to_string(),
                 sender_id: "local".to_string(),
-            }))
+            })))
             .await
             .unwrap();
         assert!(res.is_none());

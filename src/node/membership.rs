@@ -144,7 +144,6 @@ impl MembershipHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node::protocol::{PingMessage, ProtocolMessage};
 
     #[tokio::test]
     async fn it_should_create_membership_add_and_remove_members() {

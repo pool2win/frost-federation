@@ -213,10 +213,10 @@ mockall::mock! {
 }
 
 #[cfg(test)]
-mod tests {
+mod connection_tests {
     use super::ConnectionHandle;
     use crate::node::noise_handler::MockNoiseIO;
-    use crate::node::protocol::{PingMessage, ProtocolMessage};
+    use crate::node::protocol::{Message, PingMessage};
     use crate::node::reliable_sender::ReliableNetworkMessage;
     use tokio_util::bytes::{Bytes, BytesMut};
 
@@ -253,12 +253,22 @@ mod tests {
             .expect_read_handshake_message()
             .return_const(Bytes::from("-> e"));
         noise.expect_start_transport().return_const(());
-        let msg = ReliableNetworkMessage::Send(PingMessage::start("localhost".into()).unwrap(), 1);
+        let ping_message = Message::Ping(PingMessage {
+            message: "ping".to_string(),
+            sender_id: "local".to_string(),
+        });
+
+        let msg = ReliableNetworkMessage::Send(ping_message.clone(), 1);
         noise
             .expect_build_transport_message()
             .return_const(msg.as_bytes().unwrap());
         noise.expect_read_transport_message().returning(|_| {
-            ReliableNetworkMessage::Send(PingMessage::start("localhost".into()).unwrap(), 2)
+            let ping_message_2 = Message::Ping(PingMessage {
+                message: "ping".to_string(),
+                sender_id: "local".to_string(),
+            });
+
+            ReliableNetworkMessage::Send(ping_message_2, 2)
                 .as_bytes()
                 .unwrap()
         });
@@ -267,9 +277,6 @@ mod tests {
         let _ = handle.send(msg).await;
 
         let received_msg = receiver.recv().await.unwrap();
-        assert_eq!(
-            received_msg,
-            ReliableNetworkMessage::Send(PingMessage::start("localhost".into()).unwrap(), 2)
-        );
+        assert_eq!(received_msg, ReliableNetworkMessage::Send(ping_message, 2));
     }
 }
