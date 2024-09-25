@@ -16,8 +16,12 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use super::{message_id_generator::MessageId, Message, ProtocolMessage};
+use super::{Message, ProtocolMessage};
+use futures::{Future, FutureExt};
 use serde::{Deserialize, Serialize};
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use tower::{BoxError, Service};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct HandshakeMessage {
@@ -59,9 +63,51 @@ impl ProtocolMessage for HandshakeMessage {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Handshake {
+    sender_id: String,
+}
+
+/// Service for handling Handshake protocol.
+///
+/// By making all protocol into a Service, we can use tower:Steer to
+/// multiplex across services.
+impl Service<Option<HandshakeMessage>> for Handshake {
+    type Response = Option<HandshakeMessage>;
+    type Error = BoxError;
+    type Future = Pin<Box<dyn Future<Output = Result<Option<HandshakeMessage>, BoxError>>>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, msg: Option<HandshakeMessage>) -> Self::Future {
+        let sender_id = self.sender_id.clone();
+        async move {
+            match msg {
+                None => Ok(Some(HandshakeMessage {
+                    message: "helo".to_string(),
+                    sender_id,
+                    version: "0.1.0".to_string(),
+                })),
+                Some(msg) => match msg.message.as_str() {
+                    "helo" => Ok(Some(HandshakeMessage {
+                        message: "oleh".to_string(),
+                        sender_id,
+                        version: "0.1.0".to_string(),
+                    })),
+                    _ => Ok(None),
+                },
+            }
+        }
+        .boxed()
+    }
+}
+
 #[cfg(test)]
-mod tests {
-    use crate::node::protocol::{HandshakeMessage, Message, ProtocolMessage};
+mod handshake_tests {
+    use crate::node::protocol::{Handshake, HandshakeMessage, Message, ProtocolMessage};
+    use tower::{Service, ServiceExt};
 
     #[test]
     fn it_matches_start_message_for_handshake() {
@@ -112,5 +158,68 @@ mod tests {
 
         let response = start_message.response_for_received("localhost");
         assert_eq!(response, Err("Bad message".to_string()));
+    }
+
+    #[tokio::test]
+    async fn it_should_create_ping_as_service_and_respond_to_none_with_handshake() {
+        let mut p = Handshake {
+            sender_id: "local".to_string(),
+        };
+        let res = p.ready().await.unwrap().call(None).await.unwrap();
+        assert!(res.is_some());
+        assert_eq!(
+            res,
+            Some(HandshakeMessage {
+                message: "helo".to_string(),
+                sender_id: "local".to_string(),
+                version: "0.1.0".to_string()
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn it_should_create_ping_as_service_and_respond_to_helo_with_oleh() {
+        let mut p = Handshake {
+            sender_id: "local".to_string(),
+        };
+        let res = p
+            .ready()
+            .await
+            .unwrap()
+            .call(Some(HandshakeMessage {
+                message: "helo".to_string(),
+                sender_id: "local".to_string(),
+                version: "0.1.0".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert!(res.is_some());
+        assert_eq!(
+            res,
+            Some(HandshakeMessage {
+                message: "oleh".to_string(),
+                sender_id: "local".to_string(),
+                version: "0.1.0".to_string()
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn it_should_create_ping_as_service_and_respond_to_oleh_with_none() {
+        let mut p = Handshake {
+            sender_id: "local".to_string(),
+        };
+        let res = p
+            .ready()
+            .await
+            .unwrap()
+            .call(Some(HandshakeMessage {
+                message: "oleh".to_string(),
+                sender_id: "local".to_string(),
+                version: "0.1.0".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert!(res.is_none());
     }
 }
