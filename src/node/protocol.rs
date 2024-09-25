@@ -24,15 +24,11 @@ mod heartbeat;
 pub(crate) mod message_id_generator;
 mod ping;
 
-#[mockall_double::double]
-use super::reliable_sender::ReliableSenderHandle;
-use futures::Future;
 pub use handshake::{Handshake, HandshakeMessage};
 pub use heartbeat::{Heartbeat, HeartbeatMessage};
 pub use ping::{Ping, PingMessage};
 use serde::{Deserialize, Serialize};
-use std::pin::Pin;
-use tower::{util::BoxService, BoxError, Service};
+use tower::{util::BoxService, BoxError};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum Message {
