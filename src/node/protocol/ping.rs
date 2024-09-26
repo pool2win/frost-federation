@@ -33,6 +33,10 @@ impl PingMessage {
     pub fn default_as_message() -> Message {
         Message::Ping(PingMessage::default())
     }
+
+    pub fn new_message(sender_id: String, message: String) -> Message {
+        Message::Ping(PingMessage { sender_id, message })
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -64,16 +68,16 @@ impl Service<Option<Message>> for Ping {
         Box::pin(async move {
             match msg {
                 Some(Message::Ping(PingMessage { message, sender_id })) => match message.as_str() {
-                    "ping" => Ok(Some(Message::Ping(PingMessage {
-                        message: "pong".to_string(),
-                        sender_id: local_sender_id,
-                    }))),
+                    "ping" => Ok(Some(PingMessage::new_message(
+                        local_sender_id,
+                        "pong".to_string(),
+                    ))),
                     _ => Ok(None),
                 },
-                _ => Ok(Some(Message::Ping(PingMessage {
-                    message: "ping".to_string(),
-                    sender_id: local_sender_id,
-                }))),
+                _ => Ok(Some(PingMessage::new_message(
+                    local_sender_id,
+                    "ping".to_string(),
+                ))),
             }
         })
     }
@@ -88,60 +92,59 @@ mod ping_tests {
 
     #[tokio::test]
     async fn it_should_create_ping_as_service_and_respond_to_none_with_ping() {
-        let mut p = Ping {
-            sender_id: "local".to_string(),
-        };
+        let mut p = Ping::new("local".to_string());
         let res = p.ready().await.unwrap().call(None).await.unwrap();
         assert!(res.is_some());
         assert_eq!(
             res,
-            Some(Message::Ping(PingMessage {
-                message: "ping".to_string(),
-                sender_id: "local".to_string()
-            }))
+            Some(PingMessage::new_message(
+                "local".to_string(),
+                "ping".to_string()
+            ))
         );
     }
 
     #[tokio::test]
     async fn it_should_create_ping_as_service_and_respond_to_ping_with_pong() {
-        let mut p = Ping {
-            sender_id: "local".to_string(),
-        };
+        let mut p = Ping::new("local".to_string());
         let res = p
             .ready()
             .await
             .unwrap()
-            .call(Some(Message::Ping(PingMessage {
-                message: "ping".to_string(),
-                sender_id: "local".to_string(),
-            })))
+            .call(Some(PingMessage::new_message(
+                "local".to_string(),
+                "ping".to_string(),
+            )))
             .await
             .unwrap();
         assert!(res.is_some());
         assert_eq!(
             res,
-            Some(Message::Ping(PingMessage {
-                message: "pong".to_string(),
-                sender_id: "local".to_string()
-            }))
+            Some(PingMessage::new_message(
+                "local".to_string(),
+                "pong".to_string()
+            ))
         );
     }
 
     #[tokio::test]
     async fn it_should_create_ping_as_service_and_respond_to_pong_with_none() {
-        let mut p = Ping {
-            sender_id: "local".to_string(),
-        };
+        let mut p = Ping::new("local".to_string());
         let res = p
             .ready()
             .await
             .unwrap()
-            .call(Some(Message::Ping(PingMessage {
-                message: "pong".to_string(),
-                sender_id: "local".to_string(),
-            })))
+            .call(Some(PingMessage::new_message(
+                "local".to_string(),
+                "pong".to_string(),
+            )))
             .await
             .unwrap();
         assert!(res.is_none());
+    }
+
+    #[test]
+    fn it_should_create_default_ping_message() {
+        assert_eq!(PingMessage::default().sender_id, "".to_string())
     }
 }
