@@ -23,13 +23,19 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower::{BoxError, Service};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Default)]
 pub struct PingMessage {
     pub sender_id: String,
     pub message: String,
 }
 
-#[derive(Debug, Clone)]
+impl PingMessage {
+    pub fn default_as_message() -> Message {
+        Message::Ping(PingMessage::default())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct Ping {
     sender_id: String,
 }

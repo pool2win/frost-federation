@@ -29,6 +29,21 @@ pub struct HeartbeatMessage {
     pub time: SystemTime,
 }
 
+impl Default for HeartbeatMessage {
+    fn default() -> Self {
+        HeartbeatMessage {
+            sender_id: String::default(),
+            time: SystemTime::now(),
+        }
+    }
+}
+
+impl HeartbeatMessage {
+    pub fn default_as_message() -> Message {
+        Message::Heartbeat(HeartbeatMessage::default())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Heartbeat {
     sender_id: String,
@@ -54,14 +69,19 @@ impl Service<Option<Message>> for Heartbeat {
     }
 
     fn call(&mut self, msg: Option<Message>) -> Self::Future {
-        let sender_id = self.sender_id.clone();
+        let self_sender_id = self.sender_id.clone();
         async move {
             match msg {
-                None => Ok(Some(Message::Heartbeat(HeartbeatMessage {
-                    time: SystemTime::now(),
-                    sender_id,
-                }))),
-                Some(_) => Ok(None),
+                Some(Message::Heartbeat(HeartbeatMessage { sender_id, time })) => {
+                    match sender_id.as_str() {
+                        "" => Ok(Some(Message::Heartbeat(HeartbeatMessage {
+                            time: SystemTime::now(),
+                            sender_id: self_sender_id,
+                        }))),
+                        _ => Ok(None),
+                    }
+                }
+                _ => Ok(None),
             }
         }
         .boxed()
@@ -76,19 +96,35 @@ mod heartbeat_tests {
     use tower::{Service, ServiceExt};
 
     #[tokio::test]
-    async fn it_should_create_ping_as_service_and_respond_to_none_with_handshake() {
+    async fn it_should_create_heartbeat_as_service_and_respond_to_none_with_handshake() {
         let mut p = Heartbeat {
             sender_id: "local".to_string(),
         };
-        if let Some(Message::Heartbeat(msg)) = p.ready().await.unwrap().call(None).await.unwrap() {
+        let res = p.ready().await.unwrap().call(None).await.unwrap();
+        assert!(res.is_none());
+    }
+
+    #[tokio::test]
+    async fn it_should_create_heartbeat_as_service_and_respond_to_default_with_handshake() {
+        let mut p = Heartbeat {
+            sender_id: "local".to_string(),
+        };
+        if let Some(Message::Heartbeat(msg)) = p
+            .ready()
+            .await
+            .unwrap()
+            .call(Some(HeartbeatMessage::default_as_message()))
+            .await
+            .unwrap()
+        {
             assert_eq!(msg.sender_id, "local".to_string());
         } else {
-            assert!(false, "Message not a ping message");
+            assert!(false, "Message not a heartbeat message");
         }
     }
 
     #[tokio::test]
-    async fn it_should_create_ping_as_service_and_respond_to_some_with_none() {
+    async fn it_should_create_heartbeat_as_service_and_respond_to_some_with_none() {
         let mut p = Heartbeat {
             sender_id: "local".to_string(),
         };

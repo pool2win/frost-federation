@@ -19,10 +19,13 @@
 use self::{
     membership::MembershipHandle, protocol::Message, reliable_sender::ReliableNetworkMessage,
 };
-use crate::node::noise_handler::{NoiseHandler, NoiseIO};
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
 use crate::node::state::State;
+use crate::node::{
+    noise_handler::{NoiseHandler, NoiseIO},
+    protocol::HandshakeMessage,
+};
 #[mockall_double::double]
 use connection::ConnectionHandle;
 use protocol::Handshake;
@@ -176,9 +179,14 @@ impl Node {
             }
             let node_id = self.get_node_id();
             // Start the first protocol to start interaction between nodes
-            let handshake_service = ServiceBuilder::new().service(Handshake::new(node_id));
-            let handshake_message = handshake_service.oneshot(None).await.unwrap().unwrap();
-            reliable_sender_handle.send(handshake_message).await;
+            let response = protocol::Protocol::new(node_id)
+                .oneshot(HandshakeMessage::default_as_message())
+                .await
+                .unwrap()
+                .unwrap();
+            // let handshake_service = ServiceBuilder::new().service(Handshake::new(node_id));
+            // let handshake_message = handshake_service.oneshot(None).await.unwrap().unwrap();
+            let _ = reliable_sender_handle.send(response).await;
             //protocol::start_protocol::<HandshakeMessage>(reliable_sender_handle, &node_id).await;
         }
     }

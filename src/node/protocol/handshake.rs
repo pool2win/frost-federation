@@ -23,11 +23,17 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower::{BoxError, Service};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Default)]
 pub struct HandshakeMessage {
     pub sender_id: String,
     pub message: String,
     pub version: String,
+}
+
+impl HandshakeMessage {
+    pub fn default_as_message() -> Message {
+        Message::Handshake(HandshakeMessage::default())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -68,13 +74,14 @@ impl Service<Option<Message>> for Handshake {
                         sender_id: local_sender_id,
                         version: "0.1.0".to_string(),
                     }))),
-                    _ => Ok(None),
+                    "oleh" => Ok(None),
+                    _ => Ok(Some(Message::Handshake(HandshakeMessage {
+                        message: "helo".to_string(),
+                        sender_id: local_sender_id,
+                        version: "0.1.0".to_string(),
+                    }))),
                 },
-                _ => Ok(Some(Message::Handshake(HandshakeMessage {
-                    message: "helo".to_string(),
-                    sender_id: local_sender_id,
-                    version: "0.1.0".to_string(),
-                }))),
+                _ => Ok(None),
             }
         }
         .boxed()
@@ -87,11 +94,26 @@ mod handshake_tests {
     use tower::{Service, ServiceExt};
 
     #[tokio::test]
-    async fn it_should_create_ping_as_service_and_respond_to_none_with_handshake() {
+    async fn it_should_create_handshake_as_service_and_respond_to_none_with_handshake() {
         let mut p = Handshake {
             sender_id: "local".to_string(),
         };
         let res = p.ready().await.unwrap().call(None).await.unwrap();
+        assert!(res.is_none());
+    }
+
+    #[tokio::test]
+    async fn it_should_create_handshake_as_service_and_respond_to_none_message_with_handshake() {
+        let mut p = Handshake {
+            sender_id: "local".to_string(),
+        };
+        let res = p
+            .ready()
+            .await
+            .unwrap()
+            .call(Some(HandshakeMessage::default_as_message()))
+            .await
+            .unwrap();
         assert!(res.is_some());
         assert_eq!(
             res,
@@ -104,7 +126,7 @@ mod handshake_tests {
     }
 
     #[tokio::test]
-    async fn it_should_create_ping_as_service_and_respond_to_helo_with_oleh() {
+    async fn it_should_create_handshake_as_service_and_respond_to_helo_with_oleh() {
         let mut p = Handshake {
             sender_id: "local".to_string(),
         };
@@ -131,7 +153,7 @@ mod handshake_tests {
     }
 
     #[tokio::test]
-    async fn it_should_create_ping_as_service_and_respond_to_oleh_with_none() {
+    async fn it_should_create_handshake_as_service_and_respond_to_oleh_with_none() {
         let mut p = Handshake {
             sender_id: "local".to_string(),
         };
