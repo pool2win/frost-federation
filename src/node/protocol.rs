@@ -24,11 +24,15 @@ mod heartbeat;
 pub(crate) mod message_id_generator;
 mod ping;
 
+use futures::{Future, FutureExt};
 pub use handshake::{Handshake, HandshakeMessage};
 pub use heartbeat::{Heartbeat, HeartbeatMessage};
 pub use ping::{Ping, PingMessage};
 use serde::{Deserialize, Serialize};
-use tower::{util::BoxService, BoxError};
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use tower::ServiceExt;
+use tower::{util::BoxService, BoxError, Service};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum Message {
@@ -58,6 +62,39 @@ pub fn service_for(
         Message::Ping(_m) => BoxService::new(Ping::new(node_id)),
         Message::Handshake(_m) => BoxService::new(Handshake::new(node_id)),
         Message::Heartbeat(_m) => BoxService::new(Heartbeat::new(node_id)),
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Protocol {
+    node_id: String,
+}
+
+impl Protocol {
+    pub fn new(node_id: String) -> Self {
+        Protocol { node_id }
+    }
+}
+
+impl Service<Message> for Protocol {
+    type Response = Option<Message>;
+    type Error = BoxError;
+    type Future = Pin<Box<dyn Future<Output = Result<Option<Message>, Self::Error>>>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, msg: Message) -> Self::Future {
+        let sender_id = self.node_id.clone();
+        Box::pin(async move {
+            let svc = match &msg {
+                Message::Ping(_m) => BoxService::new(Ping::new(sender_id)),
+                Message::Handshake(_m) => BoxService::new(Handshake::new(sender_id)),
+                Message::Heartbeat(_m) => BoxService::new(Heartbeat::new(sender_id)),
+            };
+            svc.oneshot(Some(msg)).await
+        })
     }
 }
 
