@@ -43,3 +43,13 @@ a network of size 100 nodes, and then adjust this as required]
 [link=https://github.com/pool2win/frost-federation/actions/workflows/tests.yml]
 image::https://github.com/pool2win/frost-federation/actions/workflows/tests.yml/badge.svg[Rust CI]
 
+== Coverage
+
+Note: Rust code coverage misses a lot of lines. We still share links to the report for transparency
+
+[link=https://codecov.io/gh/pool2win/frost-federation]
+image::https://codecov.io/gh/pool2win/frost-federation/graph/badge.svg?token=W3FWIFM232[Codecov]
+
+[link=https://codecov.io/gh/pool2win/frost-federation]
+image::https://codecov.io/gh/pool2win/frost-federation/graphs/icicle.svg?token=W3FWIFM232[Codecov]
+
