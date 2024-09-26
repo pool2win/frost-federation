@@ -99,4 +99,18 @@ impl Service<Message> for Protocol {
 }
 
 #[cfg(test)]
-mod protocol_tests {}
+mod protocol_tests {
+
+    use tower::ServiceExt;
+
+    use super::Protocol;
+    use crate::node::protocol::ping::PingMessage;
+
+    #[tokio::test]
+    async fn it_should_create_protocol() {
+        let p = Protocol::new("local".to_string());
+
+        let m = p.oneshot(PingMessage::default_as_message()).await;
+        assert!(m.unwrap().is_none());
+    }
+}
