@@ -179,15 +179,19 @@ impl Node {
             }
             let node_id = self.get_node_id();
             // Start the first protocol to start interaction between nodes
-            let response = protocol::Protocol::new(node_id)
+            if let Ok(response) = protocol::Protocol::new(node_id)
                 .oneshot(HandshakeMessage::default_as_message())
                 .await
-                .unwrap()
-                .unwrap();
-            // let handshake_service = ServiceBuilder::new().service(Handshake::new(node_id));
-            // let handshake_message = handshake_service.oneshot(None).await.unwrap().unwrap();
-            let _ = reliable_sender_handle.send(response).await;
-            //protocol::start_protocol::<HandshakeMessage>(reliable_sender_handle, &node_id).await;
+            {
+                match response {
+                    Some(msg) => {
+                        let _ = reliable_sender_handle.send(msg).await;
+                    }
+                    _ => log::error!("Error starting handshake"),
+                }
+            } else {
+                log::error!("Error starting handshake");
+            }
         }
     }
 
