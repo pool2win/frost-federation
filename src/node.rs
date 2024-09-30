@@ -181,10 +181,10 @@ impl Node {
             let node_id = self.get_node_id();
 
             let handshake_service = protocol::Protocol::new(node_id);
-            let mut reliable_sender_service =
+            let reliable_sender_service =
                 ReliableSend::new(handshake_service, reliable_sender_handle);
             let _ = reliable_sender_service
-                .call(HandshakeMessage::default_as_message())
+                .oneshot(HandshakeMessage::default_as_message())
                 .await;
         }
     }

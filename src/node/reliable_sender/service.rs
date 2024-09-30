@@ -41,12 +41,8 @@ where
         Box::pin(async move {
             let response_message = this.inner.call(msg).await;
             match response_message {
-                Ok(Some(msg)) => {
-                    let _x = this.sender.send(msg).await;
-                    Ok(())
-                }
-                _ => Ok(()),
-                //Err(e) => Err(Box::new(e)),
+                Ok(Some(msg)) => this.sender.send(msg).await,
+                _ => Err("Error sending reliable message".into()),
             }
         })
     }
