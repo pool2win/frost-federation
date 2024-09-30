@@ -19,6 +19,8 @@
 use self::{
     membership::MembershipHandle, protocol::Message, reliable_sender::ReliableNetworkMessage,
 };
+use crate::node::noise_handler::handshake;
+use crate::node::reliable_sender::service::ReliableSend;
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
 use crate::node::state::State;
@@ -28,7 +30,6 @@ use crate::node::{
 };
 #[mockall_double::double]
 use connection::ConnectionHandle;
-use protocol::Handshake;
 use std::error::Error;
 use tokio::{
     net::{
@@ -38,7 +39,7 @@ use tokio::{
     sync::mpsc::Receiver,
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-use tower::{Service, ServiceBuilder, ServiceExt};
+use tower::{Service, ServiceExt};
 
 mod connection;
 mod echo_broadcast;
@@ -178,6 +179,12 @@ impl Node {
                 return;
             }
             let node_id = self.get_node_id();
+
+            // let handshake_service = protocol::Protocol::new(node_id);
+            // let reliable_sender_service =
+            //     ReliableSend::new(handshake_service, reliable_sender_handle);
+            // reliable_sender_service.call(Some(HandshakeMessage::default_as_message()));
+
             // Start the first protocol to start interaction between nodes
             if let Ok(response) = protocol::Protocol::new(node_id)
                 .oneshot(HandshakeMessage::default_as_message())

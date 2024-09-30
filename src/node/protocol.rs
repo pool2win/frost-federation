@@ -79,7 +79,7 @@ impl Protocol {
 impl Service<Message> for Protocol {
     type Response = Option<Message>;
     type Error = BoxError;
-    type Future = Pin<Box<dyn Future<Output = Result<Option<Message>, Self::Error>>>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Option<Message>, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -87,14 +87,15 @@ impl Service<Message> for Protocol {
 
     fn call(&mut self, msg: Message) -> Self::Future {
         let sender_id = self.node_id.clone();
-        Box::pin(async move {
+        async move {
             let svc = match &msg {
                 Message::Ping(_m) => BoxService::new(Ping::new(sender_id)),
                 Message::Handshake(_m) => BoxService::new(Handshake::new(sender_id)),
                 Message::Heartbeat(_m) => BoxService::new(Heartbeat::new(sender_id)),
             };
             svc.oneshot(Some(msg)).await
-        })
+        }
+        .boxed()
     }
 }
 
