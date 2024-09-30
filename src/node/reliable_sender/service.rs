@@ -19,9 +19,9 @@ impl<S> ReliableSend<S> {
     }
 }
 
-impl<S> Service<Option<Message>> for ReliableSend<S>
+impl<S> Service<Message> for ReliableSend<S>
 where
-    S: Service<Option<Message>, Response = Option<Message>> + Send + Clone + 'static,
+    S: Service<Message, Response = Option<Message>> + Send + Clone + 'static,
     S::Error: Into<BoxError>,
 {
     type Response = ();
@@ -35,7 +35,7 @@ where
         }
     }
 
-    fn call(&mut self, msg: Option<Message>) -> Self::Future {
+    fn call(&mut self, msg: Message) -> Self::Future {
         let mut this = self.clone();
 
         Box::pin(async move {
