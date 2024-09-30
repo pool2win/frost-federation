@@ -57,7 +57,7 @@ impl Ping {
 impl Service<Option<Message>> for Ping {
     type Response = Option<Message>;
     type Error = BoxError;
-    type Future = Pin<Box<dyn Future<Output = Result<Option<Message>, BoxError>> + Send>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Option<Message>, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
