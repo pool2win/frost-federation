@@ -31,8 +31,7 @@ pub use ping::{Ping, PingMessage};
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tower::ServiceExt;
-use tower::{util::BoxService, BoxError, Service};
+use tower::{util::BoxService, BoxError, Service, ServiceExt};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum Message {
@@ -50,18 +49,6 @@ impl Message {
             Message::Heartbeat(m) => m.sender_id.clone(),
             Message::Ping(m) => m.sender_id.clone(),
         }
-    }
-}
-
-/// Build a service to use based on the message's type
-pub fn service_for(
-    message: &Message,
-    node_id: String,
-) -> BoxService<Option<Message>, Option<Message>, BoxError> {
-    match message {
-        Message::Ping(_m) => BoxService::new(Ping::new(node_id)),
-        Message::Handshake(_m) => BoxService::new(Handshake::new(node_id)),
-        Message::Heartbeat(_m) => BoxService::new(Heartbeat::new(node_id)),
     }
 }
 
@@ -93,7 +80,7 @@ impl Service<Message> for Protocol {
                 Message::Handshake(_m) => BoxService::new(Handshake::new(sender_id)),
                 Message::Heartbeat(_m) => BoxService::new(Heartbeat::new(sender_id)),
             };
-            svc.oneshot(Some(msg)).await
+            svc.oneshot(msg).await
         }
         .boxed()
     }
@@ -110,8 +97,7 @@ mod protocol_tests {
     #[tokio::test]
     async fn it_should_create_protocol() {
         let p = Protocol::new("local".to_string());
-
         let m = p.oneshot(PingMessage::default_as_message()).await;
-        assert!(m.unwrap().is_none());
+        assert!(m.unwrap().is_some());
     }
 }

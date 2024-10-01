@@ -51,7 +51,7 @@ impl Handshake {
 ///
 /// By making all protocol into a Service, we can use tower:Steer to
 /// multiplex across services.
-impl Service<Option<Message>> for Handshake {
+impl Service<Message> for Handshake {
     type Response = Option<Message>;
     type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Option<Message>, BoxError>> + Send>>;
@@ -60,15 +60,15 @@ impl Service<Option<Message>> for Handshake {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, msg: Option<Message>) -> Self::Future {
+    fn call(&mut self, msg: Message) -> Self::Future {
         let local_sender_id = self.sender_id.clone();
         async move {
             match msg {
-                Some(Message::Handshake(HandshakeMessage {
+                Message::Handshake(HandshakeMessage {
                     message,
                     sender_id,
                     version,
-                })) => match message.as_str() {
+                }) => match message.as_str() {
                     "helo" => Ok(Some(Message::Handshake(HandshakeMessage {
                         message: "oleh".to_string(),
                         sender_id: local_sender_id,
@@ -94,16 +94,7 @@ mod handshake_tests {
     use tower::{Service, ServiceExt};
 
     #[tokio::test]
-    async fn it_should_create_handshake_as_service_and_respond_to_none_with_handshake() {
-        let mut p = Handshake {
-            sender_id: "local".to_string(),
-        };
-        let res = p.ready().await.unwrap().call(None).await.unwrap();
-        assert!(res.is_none());
-    }
-
-    #[tokio::test]
-    async fn it_should_create_handshake_as_service_and_respond_to_none_message_with_handshake() {
+    async fn it_should_create_handshake_as_service_and_respond_to_default_message_with_handshake() {
         let mut p = Handshake {
             sender_id: "local".to_string(),
         };
@@ -111,7 +102,7 @@ mod handshake_tests {
             .ready()
             .await
             .unwrap()
-            .call(Some(HandshakeMessage::default_as_message()))
+            .call(HandshakeMessage::default_as_message())
             .await
             .unwrap();
         assert!(res.is_some());
@@ -134,11 +125,11 @@ mod handshake_tests {
             .ready()
             .await
             .unwrap()
-            .call(Some(Message::Handshake(HandshakeMessage {
+            .call(Message::Handshake(HandshakeMessage {
                 message: "helo".to_string(),
                 sender_id: "local".to_string(),
                 version: "0.1.0".to_string(),
-            })))
+            }))
             .await
             .unwrap();
         assert!(res.is_some());
@@ -161,11 +152,11 @@ mod handshake_tests {
             .ready()
             .await
             .unwrap()
-            .call(Some(Message::Handshake(HandshakeMessage {
+            .call(Message::Handshake(HandshakeMessage {
                 message: "oleh".to_string(),
                 sender_id: "local".to_string(),
                 version: "0.1.0".to_string(),
-            })))
+            }))
             .await
             .unwrap();
         assert!(res.is_none());
