@@ -19,9 +19,7 @@
 use self::{
     membership::MembershipHandle, protocol::Message, reliable_sender::ReliableNetworkMessage,
 };
-use crate::node::noise_handler::handshake;
 use crate::node::reliable_sender::service::ReliableSend;
-#[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
 use crate::node::state::State;
 use crate::node::{
@@ -39,7 +37,8 @@ use tokio::{
     sync::mpsc::Receiver,
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-use tower::{Service, ServiceExt};
+use tower::Layer;
+use tower::{timeout::TimeoutLayer, Service, ServiceExt};
 
 mod connection;
 mod echo_broadcast;
@@ -183,7 +182,11 @@ impl Node {
             let handshake_service = protocol::Protocol::new(node_id);
             let reliable_sender_service =
                 ReliableSend::new(handshake_service, reliable_sender_handle);
-            let _ = reliable_sender_service
+            let timeout_layer = tower::timeout::TimeoutLayer::new(
+                tokio::time::Duration::from_millis(self.delivery_timeout),
+            );
+            let _ = timeout_layer
+                .layer(reliable_sender_service)
                 .oneshot(HandshakeMessage::default_as_message())
                 .await;
         }
@@ -235,12 +238,8 @@ impl Node {
         connection_handle: ConnectionHandle,
         connection_receiver: Receiver<ReliableNetworkMessage>,
     ) -> (ReliableSenderHandle, Receiver<Message>) {
-        let (reliable_sender_handle, application_receiver) = ReliableSenderHandle::start(
-            connection_handle,
-            connection_receiver,
-            self.delivery_timeout,
-        )
-        .await;
+        let (application_receiver, reliable_sender_handle) =
+            ReliableSenderHandle::start(connection_handle, connection_receiver).await;
         (reliable_sender_handle, application_receiver)
     }
 
@@ -252,23 +251,19 @@ impl Node {
     ) {
         let membership_handle = self.state.membership_handle.clone();
         let node_id = self.get_node_id();
+        let timeout = self.delivery_timeout;
         tokio::spawn(async move {
             while let Some(message) = application_receiver.recv().await {
                 log::debug!("Application message received {:?}", message);
-                let mut service = protocol::service_for(&message, node_id.clone());
-                let response = service.call(Some(message)).await;
-                match response {
-                    Ok(Some(response)) => {
-                        log::debug!("Sending Response {:?}", response);
-                        let _ = reliable_sender_handle.send(response).await;
-                    }
-                    Ok(None) => {
-                        log::info!("No response to send ")
-                    }
-                    Err(e) => {
-                        log::info!("Error generating response {}", e)
-                    }
-                }
+                let protocol_service = protocol::Protocol::new(node_id.clone());
+                let reliable_sender_service =
+                    ReliableSend::new(protocol_service, reliable_sender_handle.clone());
+                let timeout_layer =
+                    tower::timeout::TimeoutLayer::new(tokio::time::Duration::from_millis(timeout));
+                let _ = timeout_layer
+                    .layer(reliable_sender_service)
+                    .oneshot(message)
+                    .await;
             }
             log::debug!("Connection clean up");
             let _ = membership_handle.remove_member(addr).await;

@@ -42,6 +42,10 @@ impl HeartbeatMessage {
     pub fn default_as_message() -> Message {
         Message::Heartbeat(HeartbeatMessage::default())
     }
+
+    pub fn new(sender_id: String, time: SystemTime) -> Message {
+        Message::Heartbeat(HeartbeatMessage { sender_id, time })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -59,7 +63,7 @@ impl Heartbeat {
 ///
 /// By making all protocol into a Service, we can use tower:Steer to
 /// multiplex across services.
-impl Service<Option<Message>> for Heartbeat {
+impl Service<Message> for Heartbeat {
     type Response = Option<Message>;
     type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Option<Message>, BoxError>> + Send>>;
@@ -68,11 +72,11 @@ impl Service<Option<Message>> for Heartbeat {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, msg: Option<Message>) -> Self::Future {
+    fn call(&mut self, msg: Message) -> Self::Future {
         let self_sender_id = self.sender_id.clone();
         async move {
             match msg {
-                Some(Message::Heartbeat(HeartbeatMessage { sender_id, time })) => {
+                Message::Heartbeat(HeartbeatMessage { sender_id, time }) => {
                     match sender_id.as_str() {
                         "" => Ok(Some(Message::Heartbeat(HeartbeatMessage {
                             time: SystemTime::now(),
@@ -96,16 +100,25 @@ mod heartbeat_tests {
     use tower::{Service, ServiceExt};
 
     #[tokio::test]
-    async fn it_should_create_heartbeat_as_service_and_respond_to_none_with_handshake() {
+    async fn it_should_create_heartbeat_as_service_and_respond_to_heartbeat_with_none() {
         let mut p = Heartbeat {
             sender_id: "local".to_string(),
         };
-        let res = p.ready().await.unwrap().call(None).await.unwrap();
+        let res = p
+            .ready()
+            .await
+            .unwrap()
+            .call(HeartbeatMessage::new(
+                "local".to_string(),
+                SystemTime::now(),
+            ))
+            .await
+            .unwrap();
         assert!(res.is_none());
     }
 
     #[tokio::test]
-    async fn it_should_create_heartbeat_as_service_and_respond_to_default_with_handshake() {
+    async fn it_should_create_heartbeat_as_service_and_respond_to_default_with_heartbeat() {
         let mut p = Heartbeat {
             sender_id: "local".to_string(),
         };
@@ -113,7 +126,7 @@ mod heartbeat_tests {
             .ready()
             .await
             .unwrap()
-            .call(Some(HeartbeatMessage::default_as_message()))
+            .call(HeartbeatMessage::default_as_message())
             .await
             .unwrap()
         {
@@ -132,10 +145,10 @@ mod heartbeat_tests {
             .ready()
             .await
             .unwrap()
-            .call(Some(Message::Heartbeat(HeartbeatMessage {
+            .call(Message::Heartbeat(HeartbeatMessage {
                 sender_id: "local".to_string(),
                 time: SystemTime::now(),
-            })))
+            }))
             .await
             .unwrap();
         assert!(res.is_none());

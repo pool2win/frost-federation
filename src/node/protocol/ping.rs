@@ -17,7 +17,7 @@
 // <https://www.gnu.org/licenses/>.
 
 use crate::node::protocol::Message;
-use futures::Future;
+use futures::{Future, FutureExt};
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -34,7 +34,7 @@ impl PingMessage {
         Message::Ping(PingMessage::default())
     }
 
-    pub fn new_message(sender_id: String, message: String) -> Message {
+    pub fn new(sender_id: String, message: String) -> Message {
         Message::Ping(PingMessage { sender_id, message })
     }
 }
@@ -54,7 +54,7 @@ impl Ping {
 ///
 /// By making all protocol into a Service, we can use tower:Steer to
 /// multiplex across services.
-impl Service<Option<Message>> for Ping {
+impl Service<Message> for Ping {
     type Response = Option<Message>;
     type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Option<Message>, Self::Error>> + Send>>;
@@ -63,23 +63,19 @@ impl Service<Option<Message>> for Ping {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, msg: Option<Message>) -> Self::Future {
+    fn call(&mut self, msg: Message) -> Self::Future {
         let local_sender_id = self.sender_id.clone();
-        Box::pin(async move {
+        async move {
             match msg {
-                Some(Message::Ping(PingMessage { message, sender_id })) => match message.as_str() {
-                    "ping" => Ok(Some(PingMessage::new_message(
-                        local_sender_id,
-                        "pong".to_string(),
-                    ))),
+                Message::Ping(m) => match m.message.as_str() {
+                    "" => Ok(Some(PingMessage::new(local_sender_id, "ping".to_string()))),
+                    "ping" => Ok(Some(PingMessage::new(local_sender_id, "pong".to_string()))),
                     _ => Ok(None),
                 },
-                _ => Ok(Some(PingMessage::new_message(
-                    local_sender_id,
-                    "ping".to_string(),
-                ))),
+                _ => Ok(None),
             }
-        })
+        }
+        .boxed()
     }
 }
 
@@ -87,20 +83,23 @@ impl Service<Option<Message>> for Ping {
 mod ping_tests {
 
     use super::Ping;
-    use crate::node::protocol::{Message, PingMessage};
+    use crate::node::protocol::PingMessage;
     use tower::{Service, ServiceExt};
 
     #[tokio::test]
     async fn it_should_create_ping_as_service_and_respond_to_none_with_ping() {
         let mut p = Ping::new("local".to_string());
-        let res = p.ready().await.unwrap().call(None).await.unwrap();
+        let res = p
+            .ready()
+            .await
+            .unwrap()
+            .call(PingMessage::default_as_message())
+            .await
+            .unwrap();
         assert!(res.is_some());
         assert_eq!(
             res,
-            Some(PingMessage::new_message(
-                "local".to_string(),
-                "ping".to_string()
-            ))
+            Some(PingMessage::new("local".to_string(), "ping".to_string()))
         );
     }
 
@@ -111,19 +110,13 @@ mod ping_tests {
             .ready()
             .await
             .unwrap()
-            .call(Some(PingMessage::new_message(
-                "local".to_string(),
-                "ping".to_string(),
-            )))
+            .call(PingMessage::new("local".to_string(), "ping".to_string()))
             .await
             .unwrap();
         assert!(res.is_some());
         assert_eq!(
             res,
-            Some(PingMessage::new_message(
-                "local".to_string(),
-                "pong".to_string()
-            ))
+            Some(PingMessage::new("local".to_string(), "pong".to_string()))
         );
     }
 
@@ -134,10 +127,7 @@ mod ping_tests {
             .ready()
             .await
             .unwrap()
-            .call(Some(PingMessage::new_message(
-                "local".to_string(),
-                "pong".to_string(),
-            )))
+            .call(PingMessage::new("local".to_string(), "pong".to_string()))
             .await
             .unwrap();
         assert!(res.is_none());

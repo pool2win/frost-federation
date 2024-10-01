@@ -20,12 +20,13 @@
 use crate::node::connection::ConnectionHandle;
 use crate::node::connection::{ConnectionResult, ConnectionResultSender};
 use crate::node::protocol::Message;
+use futures::Future;
+use mockall::automock;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
-use std::{collections::HashMap, time::Duration};
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::timeout;
 use tokio_util::bytes::Bytes;
 
 pub mod service;
@@ -175,31 +176,20 @@ async fn start_reliable_sender(mut actor: ReliableSenderActor) {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ReliableSenderHandle {
+pub struct ReliableSenderHandle {
     sender: mpsc::Sender<ReliableMessage>,
-    delivery_timeout: u64,
 }
 
-mockall::mock! {
-    #[derive(Debug)]
-    pub ReliableSenderHandle {
-        pub async fn start(connection_handle: ConnectionHandle,
-                           connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
-                           delivery_timeout: u64) ->
-            (Self, mpsc::Receiver<Message>);
-        pub async fn send(&self, message: Message) -> ConnectionResult<()>;
-    }
-    impl Clone for ReliableSenderHandle {
-        fn clone(&self) -> Self;
-    }
+#[automock]
+pub trait ReliableSender {
+    fn send(&self, message: Message) -> impl Future<Output = ConnectionResult<()>> + Send;
 }
 
 impl ReliableSenderHandle {
     pub async fn start(
         connection_handle: ConnectionHandle,
         connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
-        delivery_timeout: u64,
-    ) -> (Self, mpsc::Receiver<Message>) {
+    ) -> (mpsc::Receiver<Message>, Self) {
         let (sender, receiver) = mpsc::channel(32);
         let (application_sender, application_receiver) = mpsc::channel(32);
 
@@ -211,39 +201,24 @@ impl ReliableSenderHandle {
         );
         tokio::spawn(start_reliable_sender(actor));
 
-        (
-            ReliableSenderHandle {
-                sender,
-                delivery_timeout,
-            },
-            application_receiver,
-        )
+        (application_receiver, ReliableSenderHandle { sender })
     }
+}
 
+impl ReliableSender for ReliableSenderHandle {
     /// Send a message reliably.
-    /// On timeout in trying to wait for message reliable delivery, return an error.
-    pub async fn send(&self, message: Message) -> ConnectionResult<()> {
-        let (sender_from_actor, receiver_from_actor) = oneshot::channel();
-        let msg = ReliableMessage::Send {
-            message,
-            respond_to: sender_from_actor,
-        };
-        if let Err(e) = self.sender.send(msg).await {
-            log::info!("Error sending message to actor. Shutting down. {}", e);
-            return Err("Error sending message to actor.".into());
-        }
-        if timeout(
-            Duration::from_millis(self.delivery_timeout),
-            receiver_from_actor,
-        )
-        .await
-        .is_err()
-        {
-            // TODO: Remove this message from waiting_for_ack. This detail should stay in the actor.
-            Err("Reliable send failed on time out".into())
-        } else {
-            Ok(())
-        }
+    fn send(&self, message: Message) -> impl Future<Output = ConnectionResult<()>> + Send {
+        Box::pin(async move {
+            let (sender_from_actor, _receiver_from_actor) = oneshot::channel();
+            let msg = ReliableMessage::Send {
+                message,
+                respond_to: sender_from_actor,
+            };
+            match self.sender.send(msg).await {
+                Ok(_) => Ok(()),
+                _ => Err("Error".into()),
+            }
+        })
     }
 }
 
@@ -256,7 +231,7 @@ mod reliable_sender_tests {
     use tokio::sync::mpsc;
     use tokio_util::bytes::Bytes;
 
-    use super::ReliableSenderHandle;
+    use super::{ReliableSender, ReliableSenderHandle};
 
     #[test]
     fn it_serializes_ping_message() {
@@ -296,8 +271,8 @@ mod reliable_sender_tests {
         let mut mock_connection_handle = MockConnectionHandle::default();
         mock_connection_handle.expect_send().return_once(|_| Ok(()));
 
-        let (reliable_sender_handler, _application_receiver) =
-            ReliableSenderHandle::start(mock_connection_handle, connection_receiver, 500).await;
+        let (_application_receiver, reliable_sender_handler) =
+            ReliableSenderHandle::start(mock_connection_handle, connection_receiver).await;
 
         let message = Message::Ping(PingMessage {
             sender_id: "localhost".to_string(),
@@ -315,31 +290,13 @@ mod reliable_sender_tests {
     }
 
     #[tokio::test]
-    async fn it_should_successfully_send_message_to_actor_timeout_if_no_ack_received() {
-        let (_connection_sender, connection_receiver) = mpsc::channel(32);
-        let mut mock_connection_handle = MockConnectionHandle::default();
-        mock_connection_handle.expect_send().return_once(|_| Ok(()));
-
-        let (reliable_sender_handler, _application_receiver) =
-            ReliableSenderHandle::start(mock_connection_handle, connection_receiver, 500).await;
-
-        let message = Message::Ping(PingMessage {
-            sender_id: "localhost".to_string(),
-            message: "ping".to_string(),
-        });
-
-        let send_result = reliable_sender_handler.send(message).await;
-        assert!(send_result.is_err());
-    }
-
-    #[tokio::test]
     async fn it_should_successfully_send_ack_when_message_received() {
         let (connection_sender, connection_receiver) = mpsc::channel(32);
         let mut mock_connection_handle = MockConnectionHandle::default();
         mock_connection_handle.expect_send().return_once(|_| Ok(()));
 
-        let (_reliable_sender_handler, mut application_receiver) =
-            ReliableSenderHandle::start(mock_connection_handle, connection_receiver, 500).await;
+        let (mut application_receiver, _reliable_sender_handler) =
+            ReliableSenderHandle::start(mock_connection_handle, connection_receiver).await;
 
         let message = Message::Ping(PingMessage {
             sender_id: "localhost".to_string(),
@@ -362,8 +319,8 @@ mod reliable_sender_tests {
             .expect_send()
             .return_once(|_| Err("Some error".into()));
 
-        let (_reliable_sender_handler, mut application_receiver) =
-            ReliableSenderHandle::start(mock_connection_handle, connection_receiver, 500).await;
+        let (mut application_receiver, _reliable_sender_handler) =
+            ReliableSenderHandle::start(mock_connection_handle, connection_receiver).await;
 
         let message = Message::Ping(PingMessage {
             sender_id: "localhost".to_string(),
