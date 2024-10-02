@@ -140,60 +140,63 @@ impl MembershipHandle {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
+#[cfg(test)]
+mod membership_tests {
+    use super::*;
+    use crate::node::reliable_sender::ReliableMessage;
 
-//     #[tokio::test]
-//     async fn it_should_create_membership_add_and_remove_members() {
-//         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
-//         let reliable_sender_handle = ReliableSenderHandle::default();
-//         let reliable_sender_handle_2 = ReliableSenderHandle::default();
+    fn build_reliable_sender_handle() -> ReliableSenderHandle {
+        let (tx, rx) = mpsc::channel::<ReliableMessage>(10);
+        ReliableSenderHandle { sender: tx }
+    }
 
-//         let _ = membership_handle
-//             .add_member("localhost".to_string(), reliable_sender_handle)
-//             .await;
+    #[tokio::test]
+    async fn it_should_create_membership_add_and_remove_members() {
+        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
+        let reliable_sender_handle = build_reliable_sender_handle();
+        let reliable_sender_handle_2 = build_reliable_sender_handle();
 
-//         let _ = membership_handle
-//             .add_member("localhost2".to_string(), reliable_sender_handle_2)
-//             .await;
+        let _ = membership_handle
+            .add_member("localhost".to_string(), reliable_sender_handle)
+            .await;
 
-//         assert!(membership_handle
-//             .remove_member("localhost".to_string())
-//             .await
-//             .is_ok());
-//     }
+        let _ = membership_handle
+            .add_member("localhost2".to_string(), reliable_sender_handle_2)
+            .await;
 
-//     #[tokio::test]
-//     async fn it_should_result_in_error_when_removing_non_member() {
-//         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
+        assert!(membership_handle
+            .remove_member("localhost".to_string())
+            .await
+            .is_ok());
+    }
 
-//         assert!(membership_handle
-//             .remove_member("localhost22".to_string())
-//             .await
-//             .is_err());
-//     }
+    #[tokio::test]
+    async fn it_should_result_in_error_when_removing_non_member() {
+        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
 
-//     #[tokio::test]
-//     async fn it_should_return_members_as_empty_vec() {
-//         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
+        assert!(membership_handle
+            .remove_member("localhost22".to_string())
+            .await
+            .is_err());
+    }
 
-//         let reliable_senders = membership_handle.get_members().await;
-//         assert!(reliable_senders.unwrap().is_empty());
-//     }
+    #[tokio::test]
+    async fn it_should_return_members_as_empty_vec() {
+        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
 
-//     #[tokio::test]
-//     async fn it_should_return_members_as_vec() {
-//         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
-//         let mut reliable_sender_handle = ReliableSenderHandle::default();
-//         reliable_sender_handle
-//             .expect_clone()
-//             .returning(ReliableSenderHandle::default);
-//         let _ = membership_handle
-//             .add_member("localhost".to_string(), reliable_sender_handle)
-//             .await;
+        let reliable_senders = membership_handle.get_members().await;
+        assert!(reliable_senders.unwrap().is_empty());
+    }
 
-//         let reliable_senders = membership_handle.get_members().await;
-//         assert_eq!(reliable_senders.unwrap().len(), 1);
-//     }
-// }
+    #[tokio::test]
+    async fn it_should_return_members_as_vec() {
+        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
+        let reliable_sender_handle = build_reliable_sender_handle();
+        let _ = membership_handle
+            .add_member("localhost".to_string(), reliable_sender_handle)
+            .await;
+
+        let reliable_senders = membership_handle.get_members().await;
+        assert_eq!(reliable_senders.unwrap().len(), 1);
+    }
+}
