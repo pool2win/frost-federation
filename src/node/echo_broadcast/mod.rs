@@ -19,14 +19,15 @@
 use super::connection::{ConnectionResult, ConnectionResultSender};
 use super::membership::ReliableSenderMap;
 use super::protocol::message_id_generator::MessageId;
+use super::protocol::message_id_generator::MessageIdGenerator;
 use crate::node::protocol::Message;
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
 use std::collections::HashMap;
 use std::error::Error;
-use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::timeout;
+
+pub mod service;
 
 type EchosMap = HashMap<MessageId, HashMap<String, bool>>;
 
@@ -81,13 +82,11 @@ impl EchoBroadcastActor {
     }
 
     /// Receives messages to echo broadcast, wait for echo messages
-    /// from all members, on timeout, return an error to waiting
-    /// receiver.
+    /// from all members. Timeout is handled by layer on top.
     ///
     /// Process:
     /// 1. Wait for echos from all members for the message sent
-    /// 2. On timeout return error
-    /// 3. On receiving echos from all members, return Ok() to waiting receiver
+    /// 2. On receiving echos from all members, return Ok() to waiting receiver
     pub async fn send_message(
         &mut self,
         data: Message,
@@ -163,8 +162,6 @@ impl EchoBroadcastActor {
     }
 }
 
-use super::protocol::message_id_generator::MessageIdGenerator;
-
 /// Handler for sending and confirming echo messages for a broadcast
 /// Send using ReliableSenderHandle and then wait fro Echo message
 ///
@@ -174,7 +171,6 @@ use super::protocol::message_id_generator::MessageIdGenerator;
 #[derive(Clone)]
 pub(crate) struct EchoBroadcastHandle {
     sender: mpsc::Sender<EchoBroadcastMessage>,
-    delivery_timeout: u64,
     message_id_generator: MessageIdGenerator,
 }
 
@@ -188,7 +184,6 @@ async fn start_echo_broadcast(mut actor: EchoBroadcastActor) {
 impl EchoBroadcastHandle {
     pub fn start(
         message_id_generator: MessageIdGenerator,
-        delivery_timeout: u64,
         reliable_senders_map: ReliableSenderMap,
     ) -> Self {
         let (sender, receiver) = mpsc::channel(32);
@@ -197,7 +192,6 @@ impl EchoBroadcastHandle {
 
         Self {
             sender,
-            delivery_timeout,
             message_id_generator,
         }
     }
@@ -214,56 +208,12 @@ impl EchoBroadcastHandle {
             log::debug!("Returning send error...");
             return Err("Connection error".into());
         }
-        let result = timeout(
-            Duration::from_millis(self.delivery_timeout),
-            receiver_from_actor,
-        )
-        .await;
-        if result??.is_err() {
-            log::debug!("Returning time out error...");
-            Err("Broadcast timed out".into())
+        let result = receiver_from_actor.await;
+        if result?.is_err() {
+            Err("Broadcast error".into())
         } else {
             Ok(())
         }
-    }
-}
-
-#[cfg(test)]
-mod echo_broadcast_handler_tests {
-    use std::time::SystemTime;
-
-    use futures::FutureExt;
-
-    use crate::node::protocol::HeartbeatMessage;
-    #[mockall_double::double]
-    use crate::node::reliable_sender::ReliableSenderHandle;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn it_should_return_timeout_error_on_send_without_echos() {
-        let delivery_timeout = 10;
-        ReliableSenderHandle::default();
-        let mut mock_reliable_sender = ReliableSenderHandle::default();
-        mock_reliable_sender
-            .expect_send()
-            .return_once(|_| async { Ok(()) }.boxed());
-        let reliable_senders_map = HashMap::from([("a".to_string(), mock_reliable_sender)]);
-        let message_id_generator = MessageIdGenerator::new("localhost".to_string());
-
-        let handle = EchoBroadcastHandle::start(
-            message_id_generator,
-            delivery_timeout,
-            reliable_senders_map,
-        );
-
-        let message = Message::Heartbeat(HeartbeatMessage {
-            sender_id: "localhost".into(),
-            time: SystemTime::now(),
-        });
-
-        let result = handle.send(message).await;
-        assert!(result.is_err());
     }
 }
 
@@ -331,44 +281,6 @@ mod echo_broadcast_actor_tests {
     }
 
     #[tokio::test]
-    async fn it_should_send_handle_errors_if_echos_time_out() {
-        let mut first_reliable_sender_handle = ReliableSenderHandle::default();
-        let mut second_reliable_sender_handle = ReliableSenderHandle::default();
-
-        let msg = Message::Ping(PingMessage {
-            sender_id: "localhost".to_string(),
-            message: "ping".to_string(),
-        });
-
-        first_reliable_sender_handle
-            .expect_send()
-            .return_once(|_| async { Ok(()) }.boxed());
-        second_reliable_sender_handle
-            .expect_send()
-            .return_once(|_| async { Ok(()) }.boxed());
-
-        let reliable_senders_map = HashMap::from([
-            ("a".to_string(), first_reliable_sender_handle),
-            ("b".to_string(), second_reliable_sender_handle),
-        ]);
-        let message_id_generator = MessageIdGenerator::new("localhost".to_string());
-        let delivery_timeout = 1000;
-
-        let echo_bcast = EchoBroadcastHandle::start(
-            message_id_generator,
-            delivery_timeout,
-            reliable_senders_map,
-        );
-
-        let result = echo_bcast.send(msg).await;
-        assert_eq!(
-            result.as_ref().unwrap_err().to_string(),
-            "deadline has elapsed"
-        );
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
     async fn it_should_send_handle_errors_if_reliable_sender_returns_error() {
         let mut first_reliable_sender_handle = ReliableSenderHandle::default();
         let mut second_reliable_sender_handle = ReliableSenderHandle::default();
@@ -390,20 +302,12 @@ mod echo_broadcast_actor_tests {
             ("b".to_string(), second_reliable_sender_handle),
         ]);
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
-        let delivery_timeout = 1000;
 
-        let echo_bcast = EchoBroadcastHandle::start(
-            message_id_generator,
-            delivery_timeout,
-            reliable_senders_map,
-        );
+        let echo_bcast = EchoBroadcastHandle::start(message_id_generator, reliable_senders_map);
 
         let result = echo_bcast.send(msg).await;
         assert!(result.is_err());
-        assert_eq!(
-            result.as_ref().unwrap_err().to_string(),
-            "Broadcast timed out"
-        );
+        assert_eq!(result.as_ref().unwrap_err().to_string(), "Broadcast error");
     }
 
     #[tokio::test]
