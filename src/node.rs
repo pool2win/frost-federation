@@ -178,7 +178,6 @@ impl Node {
                 return;
             }
             let node_id = self.get_node_id();
-
             let handshake_service = protocol::Protocol::new(node_id);
             let reliable_sender_service =
                 ReliableSend::new(handshake_service, reliable_sender_handle);
