@@ -32,7 +32,7 @@ use tokio_util::bytes::Bytes;
 pub mod service;
 
 #[derive(Debug)]
-enum ReliableMessage {
+pub(crate) enum ReliableMessage {
     Send {
         message: Message,                   // Message to send
         respond_to: ConnectionResultSender, // oneshot channel to send ACK or Failure to
@@ -176,8 +176,8 @@ async fn start_reliable_sender(mut actor: ReliableSenderActor) {
 }
 
 #[derive(Clone, Debug)]
-pub struct ReliableSenderHandle {
-    sender: mpsc::Sender<ReliableMessage>,
+pub(crate) struct ReliableSenderHandle {
+    pub(crate) sender: mpsc::Sender<ReliableMessage>,
 }
 
 #[automock]
