@@ -16,10 +16,10 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use self::{
-    membership::MembershipHandle, protocol::Message, reliable_sender::ReliableNetworkMessage,
-};
+use self::{membership::MembershipHandle, protocol::Message};
 use crate::node::reliable_sender::service::ReliableSend;
+use crate::node::reliable_sender::ReliableNetworkMessage;
+#[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
 use crate::node::state::State;
 use crate::node::{
@@ -38,7 +38,7 @@ use tokio::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tower::Layer;
-use tower::{timeout::TimeoutLayer, Service, ServiceExt};
+use tower::ServiceExt;
 
 mod connection;
 mod echo_broadcast;

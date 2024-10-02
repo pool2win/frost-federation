@@ -16,11 +16,11 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
+#[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
 use std::collections::HashMap;
 use std::error::Error;
 use tokio::sync::{mpsc, oneshot};
-
 pub type ReliableSenderMap = HashMap<String, ReliableSenderHandle>;
 
 pub enum MembershipMessage {
@@ -29,7 +29,6 @@ pub enum MembershipMessage {
     GetMembers(oneshot::Sender<ReliableSenderMap>),
 }
 
-#[derive(Debug)]
 pub(crate) struct MembershipActor {
     members: ReliableSenderMap,
     receiver: mpsc::Receiver<MembershipMessage>,
@@ -143,18 +142,14 @@ impl MembershipHandle {
 #[cfg(test)]
 mod membership_tests {
     use super::*;
-    use crate::node::reliable_sender::ReliableMessage;
-
-    fn build_reliable_sender_handle() -> ReliableSenderHandle {
-        let (tx, rx) = mpsc::channel::<ReliableMessage>(10);
-        ReliableSenderHandle { sender: tx }
-    }
+    #[mockall_double::double]
+    use crate::node::reliable_sender::ReliableSenderHandle;
 
     #[tokio::test]
     async fn it_should_create_membership_add_and_remove_members() {
         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
-        let reliable_sender_handle = build_reliable_sender_handle();
-        let reliable_sender_handle_2 = build_reliable_sender_handle();
+        let reliable_sender_handle = ReliableSenderHandle::default();
+        let reliable_sender_handle_2 = ReliableSenderHandle::default();
 
         let _ = membership_handle
             .add_member("localhost".to_string(), reliable_sender_handle)
@@ -191,7 +186,10 @@ mod membership_tests {
     #[tokio::test]
     async fn it_should_return_members_as_vec() {
         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
-        let reliable_sender_handle = build_reliable_sender_handle();
+        let mut reliable_sender_handle = ReliableSenderHandle::default();
+        reliable_sender_handle
+            .expect_clone()
+            .returning(ReliableSenderHandle::default);
         let _ = membership_handle
             .add_member("localhost".to_string(), reliable_sender_handle)
             .await;

@@ -1,12 +1,13 @@
 use crate::node::protocol::Message;
-use crate::node::reliable_sender::{ReliableSender, ReliableSenderHandle};
+#[mockall_double::double]
+use crate::node::reliable_sender::ReliableSenderHandle;
 use futures::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower::{BoxError, Service};
 
 /// Service for sending protocol messages using reliable sender
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ReliableSend<S> {
     inner: S,
     sender: ReliableSenderHandle,

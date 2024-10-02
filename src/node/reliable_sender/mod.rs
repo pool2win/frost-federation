@@ -21,7 +21,6 @@ use crate::node::connection::ConnectionHandle;
 use crate::node::connection::{ConnectionResult, ConnectionResultSender};
 use crate::node::protocol::Message;
 use futures::Future;
-use mockall::automock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
@@ -141,7 +140,7 @@ impl ReliableSenderActor {
                     Some((_msg, sender)) => {
                         log::debug!("Received ACK {}", sequence_number);
                         if let Err(e) = sender.send(Ok(())) {
-                            log::info!("Error sending OK back to application {:?}", e);
+                            log::debug!("Error sending OK back to application {:?}", e);
                         }
                     }
                     None => {
@@ -180,10 +179,13 @@ pub(crate) struct ReliableSenderHandle {
     pub(crate) sender: mpsc::Sender<ReliableMessage>,
 }
 
-#[automock]
-pub trait ReliableSender {
-    fn send(&self, message: Message) -> impl Future<Output = ConnectionResult<()>> + Send;
-}
+// pub trait ReliableSender {
+//     async fn start(
+//         connection_handle: ConnectionHandle,
+//         connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
+//     ) -> (mpsc::Receiver<Message>, Self);
+//     fn send(&self, message: Message) -> impl Future<Output = ConnectionResult<()>> + Send;
+// }
 
 impl ReliableSenderHandle {
     pub async fn start(
@@ -203,22 +205,41 @@ impl ReliableSenderHandle {
 
         (application_receiver, ReliableSenderHandle { sender })
     }
-}
 
-impl ReliableSender for ReliableSenderHandle {
     /// Send a message reliably.
-    fn send(&self, message: Message) -> impl Future<Output = ConnectionResult<()>> + Send {
+    pub fn send(&self, message: Message) -> impl Future<Output = ConnectionResult<()>> + Send {
+        let this = self.clone();
         Box::pin(async move {
-            let (sender_from_actor, _receiver_from_actor) = oneshot::channel();
+            let (sender_from_actor, receiver_from_actor) = oneshot::channel();
             let msg = ReliableMessage::Send {
                 message,
                 respond_to: sender_from_actor,
             };
-            match self.sender.send(msg).await {
-                Ok(_) => Ok(()),
-                _ => Err("Error".into()),
+            if let Err(e) = this.sender.send(msg).await {
+                log::info!("Error sending message to actor. Shutting down. {}", e);
+                return Err("Error sending message to actor.".into());
+            }
+            if receiver_from_actor.await.is_err() {
+                // TODO: Remove this message from waiting_for_ack. This detail should stay in the actor.
+                Err("Reliable send failed on time out".into())
+            } else {
+                Ok(())
             }
         })
+    }
+}
+
+mockall::mock! {
+    pub ReliableSenderHandle{
+        pub async fn start(
+            connection_handle: ConnectionHandle,
+            connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
+        ) -> (mpsc::Receiver<Message>, Self);
+        pub fn send(&self, message: Message) -> impl Future<Output = ConnectionResult<()>> + Send;
+    }
+
+    impl Clone for ReliableSenderHandle {
+        fn clone(&self) -> Self;
     }
 }
 
@@ -231,7 +252,7 @@ mod reliable_sender_tests {
     use tokio::sync::mpsc;
     use tokio_util::bytes::Bytes;
 
-    use super::{ReliableSender, ReliableSenderHandle};
+    use super::ReliableSenderHandle;
 
     #[test]
     fn it_serializes_ping_message() {
