@@ -228,338 +228,344 @@ impl EchoBroadcastHandle {
     }
 }
 
-// #[cfg(test)]
-// mod echo_broadcast_handler_tests {
-//     use std::time::SystemTime;
-
-//     use crate::node::protocol::HeartbeatMessage;
-
-//     use super::*;
-
-//     #[tokio::test]
-//     async fn it_should_return_timeout_error_on_send_without_echos() {
-//         let delivery_timeout = 10;
-//         let mut mock_reliable_sender = MockReliableSender::new();
-//         mock_reliable_sender.expect_send().return_once(|_| Ok(()));
-//         let reliable_senders_map = HashMap::from([("a".to_string(), mock_reliable_sender)]);
-//         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
-
-//         let handle = EchoBroadcastHandle::start(
-//             message_id_generator,
-//             delivery_timeout,
-//             reliable_senders_map,
-//         );
-
-//         let message = Message::Heartbeat(HeartbeatMessage {
-//             sender_id: "localhost".into(),
-//             time: SystemTime::now(),
-//         });
-
-//         let result = handle.send(message).await;
-//         assert!(result.is_err());
-//     }
-// }
-
-// #[cfg(test)]
-// mod echo_broadcast_actor_tests {
-//     use super::*;
-
-//     // async fn build_reliable_sender_handle_with_ok_response() -> ReliableSenderHandle {
-//     //     let (tx, mut rx) = mpsc::channel::<ReliableMessage>(10);
-//     //     tokio::spawn(async move {
-//     //         while let Some(m) = rx.recv().await {
-//     //             //println!("Received {:?}", m);
-//     //         }
-//     //     });
-//     //     ReliableSenderHandle { sender: tx }
-//     // }
-
-//     #[tokio::test]
-//     async fn it_should_create_actor_with_echos_setup() {
-//         let (_sender, receiver) = mpsc::channel(32);
-//         let reliable_sender = ReliableSenderHandle::default();
-//         let reliable_senders_map = HashMap::from([("a".to_string(), reliable_sender)]);
-//         let actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
-
-//         assert_eq!(actor.echos.keys().count(), 0);
-//     }
-
-// #[tokio::test]
-// async fn it_should_handle_send_message_with_ok_from_reliable_sender() {
-//     let (_sender, receiver) = mpsc::channel(32);
-//     let (respond_to, waiting_for_response) = oneshot::channel();
-
-//     let reliable_sender = build_reliable_sender_handle_with_ok_response().await;
-
-//     let reliable_senders_map = HashMap::from([("a".to_string(), reliable_sender)]);
-
-//     let mut actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
-
-//     let data = Message::Ping(PingMessage {
-//         sender_id: "localhost".to_string(),
-//         message: "ping".to_string(),
-//     });
-
-//     let result = actor.send_message(data, MessageId(0), respond_to).await;
-//     assert!(result.is_ok());
-// }
-
-// #[tokio::test]
-// async fn it_should_handle_send_message_with_error_from_reliable_sender() {
-//     let (_sender, receiver) = mpsc::channel(32);
-//     let (respond_to, waiting_for_response) = oneshot::channel();
-
-//     let reliable_sender = build_reliable_sender_handle_with_ok_response().await;
-
-//     let reliable_senders_map = HashMap::from([("a".to_string(), reliable_sender)]);
-
-//     let mut actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
-
-//     let data = Message::Ping(PingMessage {
-//         sender_id: "localhost".to_string(),
-//         message: "ping".to_string(),
-//     });
-
-//     let result = actor.send_message(data, MessageId(0), respond_to).await;
-//     assert!(result.is_err());
-// }
-
-//     #[tokio::test]
-//     async fn it_should_send_handle_errors_if_echos_time_out() {
-//         let mut first_reliable_sender_handle = MockReliableSender::new();
-//         let mut second_reliable_sender_handle = MockReliableSender::new();
-
-//         let msg = Message::Ping(PingMessage {
-//             sender_id: "localhost".to_string(),
-//             message: "ping".to_string(),
-//         });
-
-//         first_reliable_sender_handle
-//             .expect_send()
-//             .return_once(|_| Ok(()));
-//         second_reliable_sender_handle
-//             .expect_send()
-//             .return_once(|_| Ok(()));
-
-//         let reliable_senders_map = HashMap::from([
-//             ("a".to_string(), first_reliable_sender_handle),
-//             ("b".to_string(), second_reliable_sender_handle),
-//         ]);
-//         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
-//         let delivery_timeout = 1000;
-
-//         let echo_bcast = EchoBroadcastHandle::start(
-//             message_id_generator,
-//             delivery_timeout,
-//             reliable_senders_map,
-//         );
-
-//         let result = echo_bcast.send(msg).await;
-//         assert_eq!(
-//             result.as_ref().unwrap_err().to_string(),
-//             "deadline has elapsed"
-//         );
-//         assert!(result.is_err());
-//     }
-
-//     #[tokio::test]
-//     async fn it_should_send_handle_errors_if_reliable_sender_returns_error() {
-//         let mut first_reliable_sender_handle = MockReliableSender::new();
-//         let mut second_reliable_sender_handle = MockReliableSender::new();
-
-//         let msg = Message::Ping(PingMessage {
-//             sender_id: "localhost".to_string(),
-//             message: "ping".to_string(),
-//         });
-
-//         first_reliable_sender_handle
-//             .expect_send()
-//             .return_once(|_| Ok(()));
-//         second_reliable_sender_handle
-//             .expect_send()
-//             .return_once(|_| Err("Error sending message".into()));
-
-//         let reliable_senders_map = HashMap::from([
-//             ("a".to_string(), first_reliable_sender_handle),
-//             ("b".to_string(), second_reliable_sender_handle),
-//         ]);
-//         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
-//         let delivery_timeout = 1000;
-
-//         let echo_bcast = EchoBroadcastHandle::start(
-//             message_id_generator,
-//             delivery_timeout,
-//             reliable_senders_map,
-//         );
-
-//         let result = echo_bcast.send(msg).await;
-//         assert!(result.is_err());
-//         assert_eq!(
-//             result.as_ref().unwrap_err().to_string(),
-//             "Broadcast timed out"
-//         );
-//     }
-
-//     #[tokio::test]
-//     async fn it_should_handle_echo_message_if_waiting_for_echos() {
-//         let mut first_reliable_sender_handle = MockReliableSender::new();
-//         let mut second_reliable_sender_handle = MockReliableSender::new();
-
-//         first_reliable_sender_handle
-//             .expect_send()
-//             .return_once(|_| Ok(()));
-//         second_reliable_sender_handle
-//             .expect_send()
-//             .return_once(|_| Ok(()));
-
-//         let reliable_senders_map = HashMap::from([
-//             ("a".to_string(), first_reliable_sender_handle),
-//             ("b".to_string(), second_reliable_sender_handle),
-//         ]);
-
-//         let (_sender, receiver) = mpsc::channel(32);
-//         let mut echo_bcast_actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
-
-//         let ping_msg = Message::Ping(PingMessage {
-//             sender_id: "localhost".to_string(),
-//             message: "ping".to_string(),
-//         });
-
-//         let msg = EchoBroadcastMessage::Echo {
-//             data: ping_msg,
-//             message_id: MessageId(1),
-//         };
-
-//         let _result = echo_bcast_actor.handle_message(msg).await;
-//         assert_eq!(echo_bcast_actor.echos.len(), 1);
-//         assert_eq!(echo_bcast_actor.echos.get(&MessageId(1)).unwrap().len(), 1);
-//         assert!(echo_bcast_actor
-//             .echos
-//             .get(&MessageId(1))
-//             .unwrap()
-//             .get("localhost")
-//             .is_some());
-//     }
-
-//     #[tokio::test]
-//     async fn it_should_add_echo_in_various_cases() {
-//         let _ = env_logger::builder().is_test(true).try_init();
-
-//         let mut first_reliable_sender_handle = MockReliableSender::new();
-//         let mut second_reliable_sender_handle = MockReliableSender::new();
-
-//         first_reliable_sender_handle
-//             .expect_send()
-//             .return_once(|_| Ok(()));
-//         second_reliable_sender_handle
-//             .expect_send()
-//             .return_once(|_| Ok(()));
-
-//         let reliable_senders_map = HashMap::from([
-//             ("b".to_string(), first_reliable_sender_handle),
-//             ("c".to_string(), second_reliable_sender_handle),
-//         ]);
-
-//         let (_sender, receiver) = mpsc::channel(32);
-//         let mut echo_bcast_actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
-
-//         echo_bcast_actor.add_echo(&MessageId(1), "b".to_string());
-//         echo_bcast_actor.add_echo(&MessageId(1), "c".to_string());
-
-//         assert_eq!(echo_bcast_actor.echos.len(), 1);
-//         assert_eq!(echo_bcast_actor.echos.get(&MessageId(1)).unwrap().len(), 2);
-
-//         // try to add same echo again
-//         echo_bcast_actor.add_echo(&MessageId(1), "b".to_string());
-//         assert_eq!(echo_bcast_actor.echos.get(&MessageId(1)).unwrap().len(), 2);
-//     }
-
-//     #[tokio::test]
-//     async fn it_should_handle_echo_before_all_received_will_add_echo() {
-//         let mut first_reliable_sender_handle = MockReliableSender::new();
-//         let mut second_reliable_sender_handle = MockReliableSender::new();
-
-//         first_reliable_sender_handle
-//             .expect_send()
-//             .return_once(|_| Ok(()));
-//         second_reliable_sender_handle
-//             .expect_send()
-//             .return_once(|_| Ok(()));
-
-//         let reliable_senders_map = HashMap::from([
-//             ("a".to_string(), first_reliable_sender_handle),
-//             ("b".to_string(), second_reliable_sender_handle),
-//         ]);
-
-//         let (_sender, receiver) = mpsc::channel(32);
-//         let mut echo_bcast_actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
-
-//         let ping_msg = Message::Ping(PingMessage {
-//             sender_id: "localhost".to_string(),
-//             message: "ping".to_string(),
-//         });
-
-//         echo_bcast_actor
-//             .handle_received_echo(ping_msg, MessageId(1))
-//             .await;
-
-//         assert_eq!(echo_bcast_actor.echos.len(), 1);
-//         assert_eq!(echo_bcast_actor.echos.get(&MessageId(1)).unwrap().len(), 1);
-//     }
-
-//     #[tokio::test]
-//     async fn it_should_handle_echo_to_manage_all_received_case() {
-//         let _ = env_logger::builder().is_test(true).try_init();
-
-//         let mut first_reliable_sender_handle = MockReliableSender::new();
-//         let mut second_reliable_sender_handle = MockReliableSender::new();
-
-//         first_reliable_sender_handle
-//             .expect_send()
-//             .return_once(|_| Ok(()));
-//         second_reliable_sender_handle
-//             .expect_send()
-//             .return_once(|_| Ok(()));
-
-//         let reliable_senders_map = HashMap::from([
-//             ("b".to_string(), first_reliable_sender_handle),
-//             ("c".to_string(), second_reliable_sender_handle),
-//         ]);
-
-//         let (_sender, receiver) = mpsc::channel(32);
-//         let (msg_sender, msg_receiver) = oneshot::channel();
-//         let mut echo_bcast_actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
-
-//         let ping_msg = Message::Ping(PingMessage {
-//             sender_id: "localhost".to_string(),
-//             message: "ping".to_string(),
-//         });
-
-//         let result = echo_bcast_actor
-//             .send_message(ping_msg.clone(), MessageId(1), msg_sender)
-//             .await;
-
-//         assert!(result.is_ok());
-//         assert_eq!(echo_bcast_actor.responders.len(), 1);
-
-//         let echo_b = Message::Ping(PingMessage {
-//             sender_id: "b".to_string(),
-//             message: "ping".to_string(),
-//         });
-
-//         let echo_c = Message::Ping(PingMessage {
-//             sender_id: "c".to_string(),
-//             message: "ping".to_string(),
-//         });
-
-//         echo_bcast_actor
-//             .handle_received_echo(echo_b, MessageId(1))
-//             .await;
-
-//         echo_bcast_actor
-//             .handle_received_echo(echo_c, MessageId(1))
-//             .await;
-
-//         assert!(msg_receiver.await.is_ok());
-//     }
-// }
+#[cfg(test)]
+mod echo_broadcast_handler_tests {
+    use std::time::SystemTime;
+
+    use futures::FutureExt;
+
+    use crate::node::protocol::HeartbeatMessage;
+    #[mockall_double::double]
+    use crate::node::reliable_sender::ReliableSenderHandle;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn it_should_return_timeout_error_on_send_without_echos() {
+        let delivery_timeout = 10;
+        ReliableSenderHandle::default();
+        let mut mock_reliable_sender = ReliableSenderHandle::default();
+        mock_reliable_sender
+            .expect_send()
+            .return_once(|_| async { Ok(()) }.boxed());
+        let reliable_senders_map = HashMap::from([("a".to_string(), mock_reliable_sender)]);
+        let message_id_generator = MessageIdGenerator::new("localhost".to_string());
+
+        let handle = EchoBroadcastHandle::start(
+            message_id_generator,
+            delivery_timeout,
+            reliable_senders_map,
+        );
+
+        let message = Message::Heartbeat(HeartbeatMessage {
+            sender_id: "localhost".into(),
+            time: SystemTime::now(),
+        });
+
+        let result = handle.send(message).await;
+        assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod echo_broadcast_actor_tests {
+    use futures::FutureExt;
+
+    use super::*;
+    use crate::node::protocol::PingMessage;
+
+    #[tokio::test]
+    async fn it_should_create_actor_with_echos_setup() {
+        let (_sender, receiver) = mpsc::channel(32);
+        let reliable_sender = ReliableSenderHandle::default();
+        let reliable_senders_map = HashMap::from([("a".to_string(), reliable_sender)]);
+        let actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
+
+        assert_eq!(actor.echos.keys().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn it_should_handle_send_message_with_ok_from_reliable_sender() {
+        let (_sender, receiver) = mpsc::channel(32);
+        let (respond_to, waiting_for_response) = oneshot::channel();
+
+        let mut reliable_sender = ReliableSenderHandle::default();
+        reliable_sender
+            .expect_send()
+            .return_once(|_| async { Ok(()) }.boxed());
+
+        let reliable_senders_map = HashMap::from([("a".to_string(), reliable_sender)]);
+
+        let mut actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
+
+        let data = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
+            message: "ping".to_string(),
+        });
+
+        let result = actor.send_message(data, MessageId(0), respond_to).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn it_should_handle_send_message_with_error_from_reliable_sender() {
+        let (_sender, receiver) = mpsc::channel(32);
+        let (respond_to, waiting_for_response) = oneshot::channel();
+
+        let mut reliable_sender = ReliableSenderHandle::default();
+        reliable_sender
+            .expect_send()
+            .return_once(|_| async { Err("Some error".into()) }.boxed());
+
+        let reliable_senders_map = HashMap::from([("a".to_string(), reliable_sender)]);
+
+        let mut actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
+
+        let data = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
+            message: "ping".to_string(),
+        });
+
+        let result = actor.send_message(data, MessageId(0), respond_to).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn it_should_send_handle_errors_if_echos_time_out() {
+        let mut first_reliable_sender_handle = ReliableSenderHandle::default();
+        let mut second_reliable_sender_handle = ReliableSenderHandle::default();
+
+        let msg = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
+            message: "ping".to_string(),
+        });
+
+        first_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| async { Ok(()) }.boxed());
+        second_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| async { Ok(()) }.boxed());
+
+        let reliable_senders_map = HashMap::from([
+            ("a".to_string(), first_reliable_sender_handle),
+            ("b".to_string(), second_reliable_sender_handle),
+        ]);
+        let message_id_generator = MessageIdGenerator::new("localhost".to_string());
+        let delivery_timeout = 1000;
+
+        let echo_bcast = EchoBroadcastHandle::start(
+            message_id_generator,
+            delivery_timeout,
+            reliable_senders_map,
+        );
+
+        let result = echo_bcast.send(msg).await;
+        assert_eq!(
+            result.as_ref().unwrap_err().to_string(),
+            "deadline has elapsed"
+        );
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn it_should_send_handle_errors_if_reliable_sender_returns_error() {
+        let mut first_reliable_sender_handle = ReliableSenderHandle::default();
+        let mut second_reliable_sender_handle = ReliableSenderHandle::default();
+
+        let msg = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
+            message: "ping".to_string(),
+        });
+
+        first_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| async { Ok(()) }.boxed());
+        second_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| async { Err("Error sending message".into()) }.boxed());
+
+        let reliable_senders_map = HashMap::from([
+            ("a".to_string(), first_reliable_sender_handle),
+            ("b".to_string(), second_reliable_sender_handle),
+        ]);
+        let message_id_generator = MessageIdGenerator::new("localhost".to_string());
+        let delivery_timeout = 1000;
+
+        let echo_bcast = EchoBroadcastHandle::start(
+            message_id_generator,
+            delivery_timeout,
+            reliable_senders_map,
+        );
+
+        let result = echo_bcast.send(msg).await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.as_ref().unwrap_err().to_string(),
+            "Broadcast timed out"
+        );
+    }
+
+    #[tokio::test]
+    async fn it_should_handle_echo_message_if_waiting_for_echos() {
+        let mut first_reliable_sender_handle = ReliableSenderHandle::default();
+        let mut second_reliable_sender_handle = ReliableSenderHandle::default();
+
+        first_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| async { Ok(()) }.boxed());
+        second_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| async { Ok(()) }.boxed());
+
+        let reliable_senders_map = HashMap::from([
+            ("a".to_string(), first_reliable_sender_handle),
+            ("b".to_string(), second_reliable_sender_handle),
+        ]);
+
+        let (_sender, receiver) = mpsc::channel(32);
+        let mut echo_bcast_actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
+
+        let ping_msg = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
+            message: "ping".to_string(),
+        });
+
+        let msg = EchoBroadcastMessage::Echo {
+            data: ping_msg,
+            message_id: MessageId(1),
+        };
+
+        let _result = echo_bcast_actor.handle_message(msg).await;
+        assert_eq!(echo_bcast_actor.echos.len(), 1);
+        assert_eq!(echo_bcast_actor.echos.get(&MessageId(1)).unwrap().len(), 1);
+        assert!(echo_bcast_actor
+            .echos
+            .get(&MessageId(1))
+            .unwrap()
+            .get("localhost")
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn it_should_add_echo_in_various_cases() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        let mut first_reliable_sender_handle = ReliableSenderHandle::default();
+        let mut second_reliable_sender_handle = ReliableSenderHandle::default();
+
+        first_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| async { Ok(()) }.boxed());
+        second_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| async { Ok(()) }.boxed());
+
+        let reliable_senders_map = HashMap::from([
+            ("b".to_string(), first_reliable_sender_handle),
+            ("c".to_string(), second_reliable_sender_handle),
+        ]);
+
+        let (_sender, receiver) = mpsc::channel(32);
+        let mut echo_bcast_actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
+
+        echo_bcast_actor.add_echo(&MessageId(1), "b".to_string());
+        echo_bcast_actor.add_echo(&MessageId(1), "c".to_string());
+
+        assert_eq!(echo_bcast_actor.echos.len(), 1);
+        assert_eq!(echo_bcast_actor.echos.get(&MessageId(1)).unwrap().len(), 2);
+
+        // try to add same echo again
+        echo_bcast_actor.add_echo(&MessageId(1), "b".to_string());
+        assert_eq!(echo_bcast_actor.echos.get(&MessageId(1)).unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn it_should_handle_echo_before_all_received_will_add_echo() {
+        let mut first_reliable_sender_handle = ReliableSenderHandle::default();
+        let mut second_reliable_sender_handle = ReliableSenderHandle::default();
+
+        first_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| async { Ok(()) }.boxed());
+        second_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| async { Ok(()) }.boxed());
+
+        let reliable_senders_map = HashMap::from([
+            ("a".to_string(), first_reliable_sender_handle),
+            ("b".to_string(), second_reliable_sender_handle),
+        ]);
+
+        let (_sender, receiver) = mpsc::channel(32);
+        let mut echo_bcast_actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
+
+        let ping_msg = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
+            message: "ping".to_string(),
+        });
+
+        echo_bcast_actor
+            .handle_received_echo(ping_msg, MessageId(1))
+            .await;
+
+        assert_eq!(echo_bcast_actor.echos.len(), 1);
+        assert_eq!(echo_bcast_actor.echos.get(&MessageId(1)).unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn it_should_handle_echo_to_manage_all_received_case() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        let mut first_reliable_sender_handle = ReliableSenderHandle::default();
+        let mut second_reliable_sender_handle = ReliableSenderHandle::default();
+
+        first_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| async { Ok(()) }.boxed());
+        second_reliable_sender_handle
+            .expect_send()
+            .return_once(|_| async { Ok(()) }.boxed());
+
+        let reliable_senders_map = HashMap::from([
+            ("b".to_string(), first_reliable_sender_handle),
+            ("c".to_string(), second_reliable_sender_handle),
+        ]);
+
+        let (_sender, receiver) = mpsc::channel(32);
+        let (msg_sender, msg_receiver) = oneshot::channel();
+        let mut echo_bcast_actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
+
+        let ping_msg = Message::Ping(PingMessage {
+            sender_id: "localhost".to_string(),
+            message: "ping".to_string(),
+        });
+
+        let result = echo_bcast_actor
+            .send_message(ping_msg.clone(), MessageId(1), msg_sender)
+            .await;
+
+        assert!(result.is_ok());
+        assert_eq!(echo_bcast_actor.responders.len(), 1);
+
+        let echo_b = Message::Ping(PingMessage {
+            sender_id: "b".to_string(),
+            message: "ping".to_string(),
+        });
+
+        let echo_c = Message::Ping(PingMessage {
+            sender_id: "c".to_string(),
+            message: "ping".to_string(),
+        });
+
+        echo_bcast_actor
+            .handle_received_echo(echo_b, MessageId(1))
+            .await;
+
+        echo_bcast_actor
+            .handle_received_echo(echo_c, MessageId(1))
+            .await;
+
+        assert!(msg_receiver.await.is_ok());
+    }
+}
