@@ -53,7 +53,7 @@ pub struct Node {
     pub bind_address: String,
     pub static_key_pem: String,
     pub delivery_timeout: u64,
-    pub state: State,
+    pub(crate) state: State,
 }
 
 impl Node {
