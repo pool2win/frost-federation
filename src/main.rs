@@ -18,12 +18,10 @@
 
 use clap::Parser;
 use std::error::Error;
-use tokio::sync::broadcast;
-use tokio_util::bytes::Bytes;
 
-mod cli;
-mod config;
-mod node;
+use frost_federation::cli;
+use frost_federation::config;
+use frost_federation::node;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -34,12 +32,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     setup_logging()?;
     setup_tracing()?;
-
-    // let manager = Arc::new(ConnectionManager::new(config.peer.max_peer_count));
-
-    let (send_to_all_tx, _) = broadcast::channel::<Bytes>(config.peer.max_pending_send_to_all);
-    let _connect_broadcast_sender = send_to_all_tx.clone();
-    let _listen_broadcast_sender = send_to_all_tx.clone();
 
     let mut node = node::Node::new()
         .await
