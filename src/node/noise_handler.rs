@@ -204,7 +204,7 @@ pub mod handshake {
 }
 
 #[cfg(test)]
-mod tests {
+mod noise_handler_tests {
 
     use super::{handshake, MockNoiseIO, NoiseHandler, NoiseIO};
     use tokio_util::bytes::{Bytes, BytesMut};
