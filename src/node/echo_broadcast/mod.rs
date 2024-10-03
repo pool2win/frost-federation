@@ -47,22 +47,23 @@ pub(crate) enum EchoBroadcastMessage {
 /// Echo Broadcast Actor model implementation.
 /// The actor receives messages from EchoBroadcastHandle
 pub(crate) struct EchoBroadcastActor {
-    reliable_sender_map: ReliableSenderMap,
+    /// A map from message id to the members in a map: message id -> [node id -> [reliable sender handles]]
+    reliable_senders: HashMap<MessageId, ReliableSenderMap>,
+    /// rx end for actor to receive requests on
     receiver: mpsc::Receiver<EchoBroadcastMessage>,
+    /// Map of echo messages received from the nodes in membership when this broadcast was initiated
     echos: EchosMap,
+    /// The rx end of the channel waiting for the message id's echo broadcast to finish
     responders: HashMap<MessageId, ConnectionResultSender>,
 }
 
 impl EchoBroadcastActor {
-    pub fn start(
-        receiver: mpsc::Receiver<EchoBroadcastMessage>,
-        reliable_sender_map: ReliableSenderMap,
-    ) -> Self {
+    pub fn start(receiver: mpsc::Receiver<EchoBroadcastMessage>) -> Self {
         Self {
-            reliable_sender_map,
             receiver,
             echos: EchosMap::new(),
             responders: HashMap::new(),
+            reliable_senders: HashMap::new(),
         }
     }
 
@@ -174,24 +175,25 @@ pub(crate) struct EchoBroadcastHandle {
     message_id_generator: MessageIdGenerator,
 }
 
+/// Start the echo broadcast actor by listening to any messages on the
+/// receiver channel
 async fn start_echo_broadcast(mut actor: EchoBroadcastActor) {
-    while let Some(message) = actor.receiver.recv().await {
-        actor.handle_message(message).await;
-    }
+    let actor = EchoBroadcastActor::start(receiver);
+    tokio::spawn(async move {
+        while let Some(message) = actor.receiver.recv().await {
+            actor.handle_message(message).await;
+        }
+    });
 }
 
 /// Handle for the echo broadcast actor
 impl EchoBroadcastHandle {
     pub fn start(
         message_id_generator: MessageIdGenerator,
-        reliable_senders_map: ReliableSenderMap,
+        actor_tx: mpsc::Sender<EchoBroadcastMessage>,
     ) -> Self {
-        let (sender, receiver) = mpsc::channel(32);
-        let actor = EchoBroadcastActor::start(receiver, reliable_senders_map);
-        tokio::spawn(start_echo_broadcast(actor));
-
         Self {
-            sender,
+            sender: actor_tx,
             message_id_generator,
         }
     }
