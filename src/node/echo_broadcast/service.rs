@@ -83,13 +83,12 @@ where
 #[cfg(test)]
 mod echo_broadcast_service_tests {
     use futures::FutureExt;
-    use std::collections::HashMap;
     use std::time::SystemTime;
     use tower::ServiceExt;
 
     use super::*;
     use crate::node::echo_broadcast::start_echo_broadcast;
-    use crate::node::membership::{self, MembershipHandle};
+    use crate::node::membership::MembershipHandle;
     use crate::node::protocol::message_id_generator::MessageIdGenerator;
     use crate::node::protocol::{HeartbeatMessage, Protocol};
     #[mockall_double::double]
@@ -108,8 +107,7 @@ mod echo_broadcast_service_tests {
             .await;
         let state = State::new(membership_handle);
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
-        let actor_tx = start_echo_broadcast().await;
-        let echo_bcast_handle = EchoBroadcastHandle::start(message_id_generator, actor_tx);
+        let echo_bcast_handle = start_echo_broadcast(message_id_generator).await;
         let message = Message::Heartbeat(HeartbeatMessage {
             sender_id: "localhost".into(),
             time: SystemTime::now(),
