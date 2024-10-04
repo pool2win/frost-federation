@@ -18,8 +18,8 @@
 
 use super::connection::{ConnectionResult, ConnectionResultSender};
 use super::membership::ReliableSenderMap;
-use super::protocol::message_id_generator::MessageId;
 use super::protocol::message_id_generator::MessageIdGenerator;
+use super::protocol::message_id_generator::{self, MessageId};
 use crate::node::protocol::Message;
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
@@ -183,7 +183,7 @@ pub(crate) struct EchoBroadcastHandle {
 
 /// Start the echo broadcast actor by listening to any messages on the
 /// receiver channel
-pub async fn start_echo_broadcast() -> mpsc::Sender<EchoBroadcastMessage> {
+pub async fn start_echo_broadcast(message_id_generator: MessageIdGenerator) -> EchoBroadcastHandle {
     let (tx, rx) = mpsc::channel(512);
     let mut actor = EchoBroadcastActor::start(rx);
     tokio::spawn(async move {
@@ -191,7 +191,10 @@ pub async fn start_echo_broadcast() -> mpsc::Sender<EchoBroadcastMessage> {
             actor.handle_message(message).await;
         }
     });
-    tx
+    EchoBroadcastHandle {
+        sender: tx,
+        message_id_generator,
+    }
 }
 
 /// Handle for the echo broadcast actor
@@ -315,11 +318,10 @@ mod echo_broadcast_actor_tests {
             ("a".to_string(), first_reliable_sender_handle),
             ("b".to_string(), second_reliable_sender_handle),
         ]);
-        let actor_tx = start_echo_broadcast().await;
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
-        let echo_bcast = EchoBroadcastHandle::start(message_id_generator, actor_tx);
+        let echo_bcast_handle = start_echo_broadcast(message_id_generator).await;
 
-        let result = echo_bcast.send(msg, reliable_senders_map).await;
+        let result = echo_bcast_handle.send(msg, reliable_senders_map).await;
         assert!(result.is_err());
         assert_eq!(result.as_ref().unwrap_err().to_string(), "Broadcast error");
     }
