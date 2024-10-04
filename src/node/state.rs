@@ -19,6 +19,13 @@
 use crate::node::membership::MembershipHandle;
 
 /// Handlers to query/update node state
+#[derive(Clone)]
 pub(crate) struct State {
     pub(crate) membership_handle: MembershipHandle,
+}
+
+impl State {
+    pub fn new(membership_handle: MembershipHandle) -> Self {
+        Self { membership_handle }
+    }
 }
