@@ -19,6 +19,7 @@
 use crate::node::echo_broadcast::EchoBroadcastHandle;
 use crate::node::membership::ReliableSenderMap;
 use crate::node::protocol::Message;
+use crate::node::state::State;
 use futures::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -28,12 +29,17 @@ use tower::{BoxError, Service};
 #[derive(Clone)]
 pub struct EchoBroadcast<S> {
     inner: S,
+    state: State,
     handle: EchoBroadcastHandle,
 }
 
 impl<S> EchoBroadcast<S> {
-    pub fn new(svc: S, handle: EchoBroadcastHandle) -> Self {
-        EchoBroadcast { inner: svc, handle }
+    pub fn new(svc: S, handle: EchoBroadcastHandle, state: State) -> Self {
+        EchoBroadcast {
+            inner: svc,
+            handle,
+            state,
+        }
     }
 }
 
@@ -61,8 +67,7 @@ where
             let response_message = this.inner.call(msg).await;
             match response_message {
                 Ok(Some(msg)) => {
-                    // TODO: Get this membership from Node::state
-                    let members = ReliableSenderMap::new();
+                    let members = this.state.membership_handle.get_members().await.unwrap();
                     if this.handle.send(msg, members).await.is_ok() {
                         Ok(())
                     } else {
@@ -80,31 +85,40 @@ mod echo_broadcast_service_tests {
     use futures::FutureExt;
     use std::collections::HashMap;
     use std::time::SystemTime;
+    use tower::ServiceExt;
 
     use super::*;
+    use crate::node::echo_broadcast::start_echo_broadcast;
+    use crate::node::membership::{self, MembershipHandle};
     use crate::node::protocol::message_id_generator::MessageIdGenerator;
-    use crate::node::protocol::HeartbeatMessage;
+    use crate::node::protocol::{HeartbeatMessage, Protocol};
     #[mockall_double::double]
     use crate::node::reliable_sender::ReliableSenderHandle;
 
     #[tokio::test]
     async fn it_should_run_service_without_error() {
-        // ReliableSenderHandle::default();
-        // let mut mock_reliable_sender = ReliableSenderHandle::default();
-        // mock_reliable_sender
-        //     .expect_send()
-        //     .return_once(|_| async { Ok(()) }.boxed());
-        // let reliable_senders_map = HashMap::from([("a".to_string(), mock_reliable_sender)]);
-        // let message_id_generator = MessageIdGenerator::new("localhost".to_string());
+        ReliableSenderHandle::default();
+        let mut mock_reliable_sender = ReliableSenderHandle::default();
+        mock_reliable_sender
+            .expect_send()
+            .return_once(|_| async { Ok(()) }.boxed());
+        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
+        let _ = membership_handle
+            .add_member("a".to_string(), mock_reliable_sender)
+            .await;
+        let state = State::new(membership_handle);
+        let message_id_generator = MessageIdGenerator::new("localhost".to_string());
+        let actor_tx = start_echo_broadcast().await;
+        let echo_bcast_handle = EchoBroadcastHandle::start(message_id_generator, actor_tx);
+        let message = Message::Heartbeat(HeartbeatMessage {
+            sender_id: "localhost".into(),
+            time: SystemTime::now(),
+        });
 
-        // let handle = EchoBroadcastHandle::start(message_id_generator, reliable_senders_map);
-
-        // let message = Message::Heartbeat(HeartbeatMessage {
-        //     sender_id: "localhost".into(),
-        //     time: SystemTime::now(),
-        // });
-
-        // let result = handle.send(message).await;
-        // assert!(result.is_err());
+        let handshake_service = Protocol::new("localhost".to_string());
+        let echo_broadcast_service =
+            EchoBroadcast::new(handshake_service, echo_bcast_handle, state);
+        let result = echo_broadcast_service.oneshot(message).await;
+        assert!(result.is_err());
     }
 }

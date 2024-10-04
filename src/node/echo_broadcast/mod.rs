@@ -183,7 +183,7 @@ pub(crate) struct EchoBroadcastHandle {
 
 /// Start the echo broadcast actor by listening to any messages on the
 /// receiver channel
-async fn start_echo_broadcast() -> mpsc::Sender<EchoBroadcastMessage> {
+pub async fn start_echo_broadcast() -> mpsc::Sender<EchoBroadcastMessage> {
     let (tx, rx) = mpsc::channel(512);
     let mut actor = EchoBroadcastActor::start(rx);
     tokio::spawn(async move {
