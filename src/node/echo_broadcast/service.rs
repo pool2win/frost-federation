@@ -17,6 +17,7 @@
 // <https://www.gnu.org/licenses/>.
 
 use crate::node::echo_broadcast::EchoBroadcastHandle;
+use crate::node::membership::ReliableSenderMap;
 use crate::node::protocol::Message;
 use futures::Future;
 use std::pin::Pin;
@@ -60,7 +61,9 @@ where
             let response_message = this.inner.call(msg).await;
             match response_message {
                 Ok(Some(msg)) => {
-                    if this.handle.send(msg).await.is_ok() {
+                    // TODO: Get this membership from Node::state
+                    let members = ReliableSenderMap::new();
+                    if this.handle.send(msg, members).await.is_ok() {
                         Ok(())
                     } else {
                         Err("Error sending echo broadcast".into())
