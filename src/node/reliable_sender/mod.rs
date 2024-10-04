@@ -67,7 +67,7 @@ struct ReliableSenderActor {
     waiting_for_ack: HashMap<u64, AckWaiter>,
     sequence_number: u64,
     connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
-    application_sender: mpsc::Sender<Message>,
+    client_tx: mpsc::Sender<Message>,
 }
 
 impl ReliableSenderActor {
@@ -75,7 +75,7 @@ impl ReliableSenderActor {
         receiver: mpsc::Receiver<ReliableMessage>,
         connection_handle: ConnectionHandle,
         connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
-        application_sender: mpsc::Sender<Message>,
+        client_tx: mpsc::Sender<Message>,
     ) -> Self {
         ReliableSenderActor {
             receiver,
@@ -83,7 +83,7 @@ impl ReliableSenderActor {
             waiting_for_ack: HashMap::new(),
             sequence_number: 0,
             connection_receiver,
-            application_sender,
+            client_tx,
         }
     }
 
@@ -114,7 +114,7 @@ impl ReliableSenderActor {
 
     /// Handle a message received from the network.
     /// If it is a Send type, send an Ack back
-    /// If it is an Ack, then remove the acked message from waiting_for_ack and return Ok() to application waiting
+    /// If it is an Ack, then remove the acked message from waiting_for_ack and return Ok() to client waiting
     async fn handle_connection_message(
         &mut self,
         msg: ReliableNetworkMessage,
@@ -130,9 +130,9 @@ impl ReliableSenderActor {
                     log::info!("Error sending ack {}", e);
                     return Err("Error sending ack".into());
                 }
-                // send message up to the application
-                if let Err(e) = self.application_sender.send(message).await {
-                    log::info!("Error sending message to application. {}", e);
+                // send message up to the client
+                if let Err(e) = self.client_tx.send(message).await {
+                    log::info!("Error sending message to client. {}", e);
                 }
             }
             ReliableNetworkMessage::Ack(sequence_number) => {
@@ -140,7 +140,7 @@ impl ReliableSenderActor {
                     Some((_msg, sender)) => {
                         log::debug!("Received ACK {}", sequence_number);
                         if let Err(e) = sender.send(Ok(())) {
-                            log::debug!("Error sending OK back to application {:?}", e);
+                            log::debug!("Error sending OK back to client {:?}", e);
                         }
                     }
                     None => {
@@ -158,7 +158,7 @@ async fn start_reliable_sender(mut actor: ReliableSenderActor) {
         tokio::select! {
             Some(msg) = actor.receiver.recv() => {
                 if let Err(e) = actor.handle_message(msg).await {
-                    log::info!("Error handling message from application. Shutting down. {}", e);
+                    log::info!("Error handling message from client. Shutting down. {}", e);
                 }
             },
             Some(msg) = actor.connection_receiver.recv() => {
@@ -193,17 +193,13 @@ impl ReliableSenderHandle {
         connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
     ) -> (mpsc::Receiver<Message>, Self) {
         let (sender, receiver) = mpsc::channel(32);
-        let (application_sender, application_receiver) = mpsc::channel(32);
+        let (client_tx, client_rx) = mpsc::channel(32);
 
-        let actor = ReliableSenderActor::new(
-            receiver,
-            connection_handle,
-            connection_receiver,
-            application_sender,
-        );
+        let actor =
+            ReliableSenderActor::new(receiver, connection_handle, connection_receiver, client_tx);
         tokio::spawn(start_reliable_sender(actor));
 
-        (application_receiver, ReliableSenderHandle { sender })
+        (client_rx, ReliableSenderHandle { sender })
     }
 
     /// Send a message reliably.
@@ -292,7 +288,7 @@ mod reliable_sender_tests {
         let mut mock_connection_handle = MockConnectionHandle::default();
         mock_connection_handle.expect_send().return_once(|_| Ok(()));
 
-        let (_application_receiver, reliable_sender_handler) =
+        let (_client_rx, reliable_sender_handler) =
             ReliableSenderHandle::start(mock_connection_handle, connection_receiver).await;
 
         let message = Message::Ping(PingMessage {
@@ -316,7 +312,7 @@ mod reliable_sender_tests {
         let mut mock_connection_handle = MockConnectionHandle::default();
         mock_connection_handle.expect_send().return_once(|_| Ok(()));
 
-        let (mut application_receiver, _reliable_sender_handler) =
+        let (mut client_rx, _reliable_sender_handler) =
             ReliableSenderHandle::start(mock_connection_handle, connection_receiver).await;
 
         let message = Message::Ping(PingMessage {
@@ -328,7 +324,7 @@ mod reliable_sender_tests {
             .send(ReliableNetworkMessage::Send(message.clone(), 1))
             .await;
 
-        let received = application_receiver.recv().await;
+        let received = client_rx.recv().await;
         assert_eq!(received, Some(message));
     }
 
@@ -340,7 +336,7 @@ mod reliable_sender_tests {
             .expect_send()
             .return_once(|_| Err("Some error".into()));
 
-        let (mut application_receiver, _reliable_sender_handler) =
+        let (mut client_rx, _reliable_sender_handler) =
             ReliableSenderHandle::start(mock_connection_handle, connection_receiver).await;
 
         let message = Message::Ping(PingMessage {
@@ -352,7 +348,7 @@ mod reliable_sender_tests {
             .send(ReliableNetworkMessage::Send(message.clone(), 1))
             .await;
 
-        let result = application_receiver.try_recv();
+        let result = client_rx.try_recv();
         assert!(result.is_err());
     }
 }
