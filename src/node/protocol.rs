@@ -21,12 +21,14 @@ extern crate serde;
 
 mod handshake;
 mod heartbeat;
+mod membership;
 pub(crate) mod message_id_generator;
 mod ping;
 
 use futures::{Future, FutureExt};
 pub use handshake::{Handshake, HandshakeMessage};
 pub use heartbeat::{Heartbeat, HeartbeatMessage};
+pub use membership::{Membership, MembershipMessage};
 pub use ping::{Ping, PingMessage};
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
@@ -38,6 +40,9 @@ pub enum Message {
     Handshake(HandshakeMessage),
     Heartbeat(HeartbeatMessage),
     Ping(PingMessage),
+    Membership(MembershipMessage),
+    BroadcastPing(PingMessage),
+    EchoPing(PingMessage),
 }
 
 /// Methods for all protocol messages
@@ -48,7 +53,34 @@ impl Message {
             Message::Handshake(m) => m.sender_id.clone(),
             Message::Heartbeat(m) => m.sender_id.clone(),
             Message::Ping(m) => m.sender_id.clone(),
+            Message::Membership(m) => m.sender_id.clone(),
+            Message::BroadcastPing(m) => m.sender_id.clone(),
+            Message::EchoPing(m) => m.sender_id.clone(),
         }
+    }
+}
+
+impl From<HeartbeatMessage> for Message {
+    fn from(value: HeartbeatMessage) -> Self {
+        Message::Heartbeat(value)
+    }
+}
+
+impl From<HandshakeMessage> for Message {
+    fn from(value: HandshakeMessage) -> Self {
+        Message::Handshake(value)
+    }
+}
+
+impl From<PingMessage> for Message {
+    fn from(value: PingMessage) -> Self {
+        Message::Ping(value)
+    }
+}
+
+impl From<MembershipMessage> for Message {
+    fn from(value: MembershipMessage) -> Self {
+        Message::Membership(value)
     }
 }
 
@@ -79,6 +111,9 @@ impl Service<Message> for Protocol {
                 Message::Ping(_m) => BoxService::new(Ping::new(sender_id)),
                 Message::Handshake(_m) => BoxService::new(Handshake::new(sender_id)),
                 Message::Heartbeat(_m) => BoxService::new(Heartbeat::new(sender_id)),
+                Message::Membership(_m) => BoxService::new(Membership::new(sender_id)),
+                Message::BroadcastPing(_m) => BoxService::new(Ping::new(sender_id)),
+                Message::EchoPing(_m) => BoxService::new(Ping::new(sender_id)),
             };
             svc.oneshot(msg).await
         }
@@ -97,7 +132,7 @@ mod protocol_tests {
     #[tokio::test]
     async fn it_should_create_protocol() {
         let p = Protocol::new("local".to_string());
-        let m = p.oneshot(PingMessage::default_as_message()).await;
+        let m = p.oneshot(PingMessage::default().into()).await;
         assert!(m.unwrap().is_some());
     }
 }

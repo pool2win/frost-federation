@@ -187,16 +187,18 @@ impl Node {
             }
             let node_id = self.get_node_id();
 
-            let handshake_service = protocol::Protocol::new(node_id.clone());
-            let reliable_sender_service =
-                ReliableSend::new(handshake_service, reliable_sender_handle);
-            let timeout_layer = tower::timeout::TimeoutLayer::new(
-                tokio::time::Duration::from_millis(self.delivery_timeout),
-            );
-            let _ = timeout_layer
-                .layer(reliable_sender_service)
-                .oneshot(HandshakeMessage::default_as_message())
-                .await;
+            // let handshake_service = protocol::Protocol::new(node_id.clone());
+            // let reliable_sender_service =
+            //     ReliableSend::new(handshake_service, reliable_sender_handle.clone());
+            // let timeout_layer = tower::timeout::TimeoutLayer::new(
+            //     tokio::time::Duration::from_millis(self.delivery_timeout),
+            // );
+            // let _ = timeout_layer
+            //     .layer(reliable_sender_service)
+            //     .oneshot(HandshakeMessage::default().into())
+            //     .await;
+
+            // log::info!("Handshake finished");
 
             let ping_service = protocol::Protocol::new(node_id.clone());
             let echo_broadcast_service = EchoBroadcast::new(
@@ -205,7 +207,7 @@ impl Node {
                 self.state.clone(),
             );
             let _ = echo_broadcast_service
-                .oneshot(PingMessage::default_as_message())
+                .oneshot(PingMessage::default().into())
                 .await;
         }
     }

@@ -39,12 +39,8 @@ impl Default for HeartbeatMessage {
 }
 
 impl HeartbeatMessage {
-    pub fn default_as_message() -> Message {
-        Message::Heartbeat(HeartbeatMessage::default())
-    }
-
-    pub fn new(sender_id: String, time: SystemTime) -> Message {
-        Message::Heartbeat(HeartbeatMessage { sender_id, time })
+    pub fn new(sender_id: String, time: SystemTime) -> Self {
+        HeartbeatMessage { sender_id, time }
     }
 }
 
@@ -108,10 +104,7 @@ mod heartbeat_tests {
             .ready()
             .await
             .unwrap()
-            .call(HeartbeatMessage::new(
-                "local".to_string(),
-                SystemTime::now(),
-            ))
+            .call(HeartbeatMessage::new("local".to_string(), SystemTime::now()).into())
             .await
             .unwrap();
         assert!(res.is_none());
@@ -126,7 +119,7 @@ mod heartbeat_tests {
             .ready()
             .await
             .unwrap()
-            .call(HeartbeatMessage::default_as_message())
+            .call(HeartbeatMessage::default().into())
             .await
             .unwrap()
         {
