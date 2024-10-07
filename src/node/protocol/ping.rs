@@ -30,12 +30,8 @@ pub struct PingMessage {
 }
 
 impl PingMessage {
-    pub fn default_as_message() -> Message {
-        Message::Ping(PingMessage::default())
-    }
-
-    pub fn new(sender_id: String, message: String) -> Message {
-        Message::Ping(PingMessage { sender_id, message })
+    pub fn new(sender_id: String, message: String) -> Self {
+        PingMessage { sender_id, message }
     }
 }
 
@@ -68,8 +64,12 @@ impl Service<Message> for Ping {
         async move {
             match msg {
                 Message::Ping(m) => match m.message.as_str() {
-                    "" => Ok(Some(PingMessage::new(local_sender_id, "ping".to_string()))),
-                    "ping" => Ok(Some(PingMessage::new(local_sender_id, "pong".to_string()))),
+                    "" => Ok(Some(
+                        PingMessage::new(local_sender_id, "ping".to_string()).into(),
+                    )),
+                    "ping" => Ok(Some(
+                        PingMessage::new(local_sender_id, "pong".to_string()).into(),
+                    )),
                     _ => Ok(None),
                 },
                 _ => Ok(None),
@@ -93,13 +93,13 @@ mod ping_tests {
             .ready()
             .await
             .unwrap()
-            .call(PingMessage::default_as_message())
+            .call(PingMessage::default().into())
             .await
             .unwrap();
         assert!(res.is_some());
         assert_eq!(
             res,
-            Some(PingMessage::new("local".to_string(), "ping".to_string()))
+            Some(PingMessage::new("local".to_string(), "ping".to_string()).into())
         );
     }
 
@@ -110,13 +110,13 @@ mod ping_tests {
             .ready()
             .await
             .unwrap()
-            .call(PingMessage::new("local".to_string(), "ping".to_string()))
+            .call(PingMessage::new("local".to_string(), "ping".to_string()).into())
             .await
             .unwrap();
         assert!(res.is_some());
         assert_eq!(
             res,
-            Some(PingMessage::new("local".to_string(), "pong".to_string()))
+            Some(PingMessage::new("local".to_string(), "pong".to_string()).into())
         );
     }
 
@@ -127,7 +127,7 @@ mod ping_tests {
             .ready()
             .await
             .unwrap()
-            .call(PingMessage::new("local".to_string(), "pong".to_string()))
+            .call(PingMessage::new("local".to_string(), "pong".to_string()).into())
             .await
             .unwrap();
         assert!(res.is_none());

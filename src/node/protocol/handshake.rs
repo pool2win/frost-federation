@@ -31,8 +31,12 @@ pub struct HandshakeMessage {
 }
 
 impl HandshakeMessage {
-    pub fn default_as_message() -> Message {
-        Message::Handshake(HandshakeMessage::default())
+    pub fn new(sender_id: String, message: String, version: String) -> Self {
+        Self {
+            sender_id,
+            message,
+            version,
+        }
     }
 }
 
@@ -102,7 +106,7 @@ mod handshake_tests {
             .ready()
             .await
             .unwrap()
-            .call(HandshakeMessage::default_as_message())
+            .call(HandshakeMessage::default().into())
             .await
             .unwrap();
         assert!(res.is_some());
