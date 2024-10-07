@@ -8,3 +8,6 @@ build:
 
 run config="config.toml":
 	RUST_LOG=debug cargo run -- --config-file={{config}}
+
+check:
+	cargo check
