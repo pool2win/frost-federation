@@ -45,10 +45,14 @@ pub enum Message {
     EchoPing(PingMessage),
 }
 
+pub trait NetworkMessage {
+    fn get_sender_id(&self) -> String;
+}
+
 /// Methods for all protocol messages
-impl Message {
+impl NetworkMessage for Message {
     /// return the sender_id for all message types
-    pub fn get_sender_id(&self) -> String {
+    fn get_sender_id(&self) -> String {
         match self {
             Message::Handshake(m) => m.sender_id.clone(),
             Message::Heartbeat(m) => m.sender_id.clone(),

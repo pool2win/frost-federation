@@ -20,9 +20,11 @@ use super::connection::{ConnectionResult, ConnectionResultSender};
 use super::membership::ReliableSenderMap;
 use super::protocol::message_id_generator::MessageIdGenerator;
 use super::protocol::message_id_generator::{self, MessageId};
+use super::protocol::NetworkMessage;
 use crate::node::protocol::Message;
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use tokio::sync::{mpsc, oneshot};
@@ -98,7 +100,10 @@ impl EchoBroadcastActor {
         message_id: MessageId,
         members: ReliableSenderMap,
         respond_to: ConnectionResultSender,
-    ) -> Result<(), Box<dyn Error + Sync + Send>> {
+    ) -> Result<(), Box<dyn Error + Sync + Send>>
+    where
+        Message: NetworkMessage + Serialize,
+    {
         let sender_id = data.get_sender_id();
         for (member, reliable_sender) in &members {
             if reliable_sender.send(data.clone()).await.is_err() {
@@ -149,7 +154,10 @@ impl EchoBroadcastActor {
     }
 
     /// Handle Echo messages received for this message
-    pub async fn handle_received_echo(&mut self, data: Message, message_id: MessageId) {
+    pub async fn handle_received_echo(&mut self, data: Message, message_id: MessageId)
+    where
+        Message: NetworkMessage + Serialize,
+    {
         let sender_id = data.get_sender_id();
 
         self.add_echo(&message_id, sender_id.clone());
