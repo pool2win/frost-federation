@@ -226,31 +226,6 @@ impl Node {
                 .await;
 
             log::info!("Echo broadcast finished");
-            // let _ = self.send_membership(reliable_sender_handle).await;
-        }
-    }
-
-    pub(crate) async fn send_membership(&self, sender: ReliableSenderHandle) {
-        log::info!("Sending membership information");
-        match self.state.membership_handle.get_members().await {
-            Err(_) => {
-                log::debug!("Error reading membership");
-            }
-            Ok(members) => {
-                let members_name = members.into_keys().collect();
-                let protocol_service =
-                    protocol::Protocol::new(self.get_node_id().clone(), self.state.clone());
-                let reliable_sender_service = ReliableSend::new(protocol_service, sender);
-                let timeout_layer = tower::timeout::TimeoutLayer::new(
-                    tokio::time::Duration::from_millis(self.delivery_timeout),
-                );
-                let _ = timeout_layer
-                    .layer(reliable_sender_service)
-                    .oneshot(
-                        MembershipMessage::new(self.get_node_id().clone(), members_name).into(),
-                    )
-                    .await;
-            }
         }
     }
 
