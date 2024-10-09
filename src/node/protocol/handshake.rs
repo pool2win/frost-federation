@@ -23,6 +23,8 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower::{BoxError, Service};
 
+use super::Unicast;
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Default)]
 pub struct HandshakeMessage {
     pub sender_id: String,
@@ -68,22 +70,26 @@ impl Service<Message> for Handshake {
         let local_sender_id = self.sender_id.clone();
         async move {
             match msg {
-                Message::Handshake(HandshakeMessage {
+                Message::UnicastMessage(Unicast::Handshake(HandshakeMessage {
                     message,
                     sender_id,
                     version,
-                }) => match message.as_str() {
-                    "helo" => Ok(Some(Message::Handshake(HandshakeMessage {
-                        message: "oleh".to_string(),
-                        sender_id: local_sender_id,
-                        version: "0.1.0".to_string(),
-                    }))),
+                })) => match message.as_str() {
+                    "helo" => Ok(Some(Message::UnicastMessage(super::Unicast::Handshake(
+                        HandshakeMessage {
+                            message: "oleh".to_string(),
+                            sender_id: local_sender_id,
+                            version: "0.1.0".to_string(),
+                        },
+                    )))),
                     "oleh" => Ok(None),
-                    _ => Ok(Some(Message::Handshake(HandshakeMessage {
-                        message: "helo".to_string(),
-                        sender_id: local_sender_id,
-                        version: "0.1.0".to_string(),
-                    }))),
+                    _ => Ok(Some(Message::UnicastMessage(super::Unicast::Handshake(
+                        HandshakeMessage {
+                            message: "helo".to_string(),
+                            sender_id: local_sender_id,
+                            version: "0.1.0".to_string(),
+                        },
+                    )))),
                 },
                 _ => Ok(None),
             }
@@ -112,11 +118,13 @@ mod handshake_tests {
         assert!(res.is_some());
         assert_eq!(
             res,
-            Some(Message::Handshake(HandshakeMessage {
-                message: "helo".to_string(),
-                sender_id: "local".to_string(),
-                version: "0.1.0".to_string()
-            }))
+            Some(Message::UnicastMessage(super::Unicast::Handshake(
+                HandshakeMessage {
+                    message: "helo".to_string(),
+                    sender_id: "local".to_string(),
+                    version: "0.1.0".to_string()
+                }
+            )))
         );
     }
 
@@ -129,21 +137,25 @@ mod handshake_tests {
             .ready()
             .await
             .unwrap()
-            .call(Message::Handshake(HandshakeMessage {
-                message: "helo".to_string(),
-                sender_id: "local".to_string(),
-                version: "0.1.0".to_string(),
-            }))
+            .call(Message::UnicastMessage(super::Unicast::Handshake(
+                HandshakeMessage {
+                    message: "helo".to_string(),
+                    sender_id: "local".to_string(),
+                    version: "0.1.0".to_string(),
+                },
+            )))
             .await
             .unwrap();
         assert!(res.is_some());
         assert_eq!(
             res,
-            Some(Message::Handshake(HandshakeMessage {
-                message: "oleh".to_string(),
-                sender_id: "local".to_string(),
-                version: "0.1.0".to_string()
-            }))
+            Some(Message::UnicastMessage(super::Unicast::Handshake(
+                HandshakeMessage {
+                    message: "oleh".to_string(),
+                    sender_id: "local".to_string(),
+                    version: "0.1.0".to_string()
+                }
+            )))
         );
     }
 
@@ -156,11 +168,13 @@ mod handshake_tests {
             .ready()
             .await
             .unwrap()
-            .call(Message::Handshake(HandshakeMessage {
-                message: "oleh".to_string(),
-                sender_id: "local".to_string(),
-                version: "0.1.0".to_string(),
-            }))
+            .call(Message::UnicastMessage(super::Unicast::Handshake(
+                HandshakeMessage {
+                    message: "oleh".to_string(),
+                    sender_id: "local".to_string(),
+                    version: "0.1.0".to_string(),
+                },
+            )))
             .await
             .unwrap();
         assert!(res.is_none());

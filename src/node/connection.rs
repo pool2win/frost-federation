@@ -253,20 +253,22 @@ mod connection_tests {
             .expect_read_handshake_message()
             .return_const(Bytes::from("-> e"));
         noise.expect_start_transport().return_const(());
-        let ping_message = Message::Ping(PingMessage {
+        let ping_message: Message = PingMessage {
             message: "ping".to_string(),
             sender_id: "local".to_string(),
-        });
+        }
+        .into();
 
         let msg = ReliableNetworkMessage::Send(ping_message.clone(), 1);
         noise
             .expect_build_transport_message()
             .return_const(msg.as_bytes().unwrap());
         noise.expect_read_transport_message().returning(|_| {
-            let ping_message_2 = Message::Ping(PingMessage {
+            let ping_message_2: Message = PingMessage {
                 message: "ping".to_string(),
                 sender_id: "local".to_string(),
-            });
+            }
+            .into();
 
             ReliableNetworkMessage::Send(ping_message_2, 2)
                 .as_bytes()

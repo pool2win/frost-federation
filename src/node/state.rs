@@ -17,15 +17,23 @@
 // <https://www.gnu.org/licenses/>.
 
 use crate::node::membership::MembershipHandle;
+use crate::node::protocol::message_id_generator::MessageIdGenerator;
 
 /// Handlers to query/update node state
 #[derive(Clone)]
 pub(crate) struct State {
     pub(crate) membership_handle: MembershipHandle,
+    pub(crate) message_id_generator: MessageIdGenerator,
 }
 
 impl State {
-    pub fn new(membership_handle: MembershipHandle) -> Self {
-        Self { membership_handle }
+    pub fn new(
+        membership_handle: MembershipHandle,
+        message_id_generator: MessageIdGenerator,
+    ) -> Self {
+        Self {
+            membership_handle,
+            message_id_generator,
+        }
     }
 }

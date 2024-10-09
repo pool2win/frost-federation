@@ -179,14 +179,6 @@ pub(crate) struct ReliableSenderHandle {
     pub(crate) sender: mpsc::Sender<ReliableMessage>,
 }
 
-// pub trait ReliableSender {
-//     async fn start(
-//         connection_handle: ConnectionHandle,
-//         connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
-//     ) -> (mpsc::Receiver<Message>, Self);
-//     fn send(&self, message: Message) -> impl Future<Output = ConnectionResult<()>> + Send;
-// }
-
 impl ReliableSenderHandle {
     pub async fn start(
         connection_handle: ConnectionHandle,
@@ -243,7 +235,7 @@ mockall::mock! {
 mod reliable_sender_tests {
     use super::ReliableNetworkMessage;
     use crate::node::connection::MockConnectionHandle;
-    use crate::node::protocol::{Message, PingMessage};
+    use crate::node::protocol::{Broadcast, Message, PingMessage, Unicast};
     use serde::Serialize;
     use tokio::sync::mpsc;
     use tokio_util::bytes::Bytes;
@@ -253,10 +245,11 @@ mod reliable_sender_tests {
     #[test]
     fn it_serializes_ping_message() {
         let ping_reliable_message = ReliableNetworkMessage::Send(
-            Message::Ping(PingMessage {
+            PingMessage {
                 sender_id: "localhost".to_string(),
                 message: String::from("ping"),
-            }),
+            }
+            .into(),
             1,
         );
         let mut s = flexbuffers::FlexbufferSerializer::new();
@@ -270,10 +263,11 @@ mod reliable_sender_tests {
     #[test]
     fn it_serializes_ping_message_using_as_bytes() {
         let ping_reliable_message = ReliableNetworkMessage::Send(
-            Message::Ping(PingMessage {
+            PingMessage {
                 sender_id: "localhost".to_string(),
                 message: String::from("ping"),
-            }),
+            }
+            .into(),
             1,
         );
         let serialized = ping_reliable_message.as_bytes().unwrap();
@@ -291,10 +285,11 @@ mod reliable_sender_tests {
         let (_client_rx, reliable_sender_handler) =
             ReliableSenderHandle::start(mock_connection_handle, connection_receiver).await;
 
-        let message = Message::Ping(PingMessage {
+        let message = PingMessage {
             sender_id: "localhost".to_string(),
             message: "ping".to_string(),
-        });
+        }
+        .into();
 
         let ack_task = tokio::spawn(async move {
             let _ = connection_sender.send(ReliableNetworkMessage::Ack(1)).await;
@@ -315,10 +310,11 @@ mod reliable_sender_tests {
         let (mut client_rx, _reliable_sender_handler) =
             ReliableSenderHandle::start(mock_connection_handle, connection_receiver).await;
 
-        let message = Message::Ping(PingMessage {
+        let message: Message = PingMessage {
             sender_id: "localhost".to_string(),
             message: "ping".to_string(),
-        });
+        }
+        .into();
 
         let _ = connection_sender
             .send(ReliableNetworkMessage::Send(message.clone(), 1))
@@ -339,10 +335,11 @@ mod reliable_sender_tests {
         let (mut client_rx, _reliable_sender_handler) =
             ReliableSenderHandle::start(mock_connection_handle, connection_receiver).await;
 
-        let message = Message::Ping(PingMessage {
+        let message: Message = PingMessage {
             sender_id: "localhost".to_string(),
             message: "ping".to_string(),
-        });
+        }
+        .into();
 
         let _ = connection_sender
             .send(ReliableNetworkMessage::Send(message.clone(), 1))

@@ -16,14 +16,13 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use crate::node::protocol::{Message, Unicast};
+use crate::node::protocol::{Broadcast, Message};
+use crate::node::state::State;
 use futures::{Future, FutureExt};
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower::{BoxError, Service};
-
-use super::Broadcast;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Default)]
 pub struct RoundOnePackageMessage {
@@ -37,14 +36,18 @@ impl RoundOnePackageMessage {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone)]
 pub struct RoundOnePackage {
     sender_id: String,
+    state: State,
 }
 
 impl RoundOnePackage {
-    pub fn new(node_id: String) -> Self {
-        RoundOnePackage { sender_id: node_id }
+    pub fn new(node_id: String, state: State) -> Self {
+        RoundOnePackage {
+            sender_id: node_id,
+            state,
+        }
     }
 }
 
@@ -62,22 +65,20 @@ impl Service<Message> for RoundOnePackage {
     }
 
     fn call(&mut self, msg: Message) -> Self::Future {
-        let local_sender_id = self.sender_id.clone();
+        let state = self.state.clone();
         async move {
             match msg {
-                Message::BroadcastMessage(Broadcast::RoundOnePackage(m)) => {
-                    match m.message.as_str() {
-                        "" => Ok(Some(
-                            RoundOnePackageMessage::new(
-                                local_sender_id,
-                                "round_one_package".to_string(),
-                            )
-                            .into(),
-                        )),
-                        _ => Ok(None),
-                    }
+                // We receive the package and don't send anything back.
+                Message::BroadcastMessage(Broadcast::RoundOnePackage(_m, Some(_mid))) => Ok(None),
+                // For the first instance of the message, add a message_id
+                Message::BroadcastMessage(Broadcast::RoundOnePackage(m, None)) => {
+                    Ok(Some(Message::BroadcastMessage(Broadcast::RoundOnePackage(
+                        m,
+                        Some(state.message_id_generator.next()),
+                    ))))
                 }
-                _ => Ok(None),
+                // We shouldn't receive round one package as a unicast
+                Message::UnicastMessage(_) => Err("Round one package should not be unicast".into()),
             }
         }
         .boxed()
@@ -88,13 +89,21 @@ impl Service<Message> for RoundOnePackage {
 mod round_one_package_tests {
 
     use super::RoundOnePackage;
-    use crate::node::protocol::RoundOnePackageMessage;
+    use crate::node::protocol::message_id_generator::MessageId;
+    use crate::node::protocol::{Message, RoundOnePackageMessage};
+    use crate::node::state::State;
+    use crate::node::MessageIdGenerator;
+    use crate::node::{membership::MembershipHandle, protocol::Broadcast};
     use tower::{Service, ServiceExt};
 
     #[tokio::test]
     async fn it_should_create_round_one_package_as_service_and_respond_to_none_with_round_one_package(
     ) {
-        let mut p = RoundOnePackage::new("local".to_string());
+        let message_id_generator = MessageIdGenerator::new("localhost".to_string());
+        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
+        let state = State::new(membership_handle, message_id_generator);
+
+        let mut p = RoundOnePackage::new("local".into(), state);
         let res = p
             .ready()
             .await
@@ -103,27 +112,31 @@ mod round_one_package_tests {
             .await
             .unwrap();
         assert!(res.is_some());
+        let Message::BroadcastMessage(Broadcast::RoundOnePackage(m, mid)) = res.unwrap() else {
+            todo!("nothing here");
+        };
         assert_eq!(
-            res,
-            Some(
-                RoundOnePackageMessage::new("local".to_string(), "round_one_package".to_string())
-                    .into()
-            )
+            m,
+            RoundOnePackageMessage::new("".to_string(), "".to_string())
         );
     }
 
     #[tokio::test]
     async fn it_should_create_round_one_package_as_service_and_respond_to_round_one_package_with_none(
     ) {
-        let mut p = RoundOnePackage::new("local".to_string());
+        let message_id_generator = MessageIdGenerator::new("localhost".to_string());
+        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
+        let state = State::new(membership_handle, message_id_generator);
+
+        let mut p = RoundOnePackage::new("local".into(), state);
         let res = p
             .ready()
             .await
             .unwrap()
-            .call(
-                RoundOnePackageMessage::new("local".to_string(), "round_one_package".to_string())
-                    .into(),
-            )
+            .call(Message::BroadcastMessage(Broadcast::RoundOnePackage(
+                RoundOnePackageMessage::new("local".to_string(), "round_one_package".to_string()),
+                Some(MessageId(1)),
+            )))
             .await
             .unwrap();
         assert!(res.is_none());

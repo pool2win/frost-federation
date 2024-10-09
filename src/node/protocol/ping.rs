@@ -16,7 +16,7 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use crate::node::protocol::Message;
+use crate::node::protocol::{Message, Unicast};
 use futures::{Future, FutureExt};
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
@@ -63,7 +63,7 @@ impl Service<Message> for Ping {
         let local_sender_id = self.sender_id.clone();
         async move {
             match msg {
-                Message::Ping(m) => match m.message.as_str() {
+                Message::UnicastMessage(Unicast::Ping(m)) => match m.message.as_str() {
                     "" => Ok(Some(
                         PingMessage::new(local_sender_id, "ping".to_string()).into(),
                     )),

@@ -16,8 +16,7 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use crate::node::echo_broadcast::EchoBroadcastHandle;
-use crate::node::membership::ReliableSenderMap;
+use crate::node::echo_broadcast::{EchoBroadcastHandle, EchoBroadcastMessage};
 use crate::node::protocol::Message;
 use crate::node::state::State;
 use futures::Future;
@@ -62,7 +61,6 @@ where
 
     fn call(&mut self, msg: Message) -> Self::Future {
         let mut this = self.clone();
-
         Box::pin(async move {
             let response_message = this.inner.call(msg).await;
             match response_message {
@@ -105,15 +103,16 @@ mod echo_broadcast_service_tests {
         let _ = membership_handle
             .add_member("a".to_string(), mock_reliable_sender)
             .await;
-        let state = State::new(membership_handle);
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
-        let echo_bcast_handle = start_echo_broadcast(message_id_generator).await;
-        let message = Message::Heartbeat(HeartbeatMessage {
+        let state = State::new(membership_handle, message_id_generator);
+        let echo_bcast_handle = start_echo_broadcast().await;
+        let message = HeartbeatMessage {
             sender_id: "localhost".into(),
             time: SystemTime::now(),
-        });
+        }
+        .into();
 
-        let handshake_service = Protocol::new("localhost".to_string());
+        let handshake_service = Protocol::new("localhost".to_string(), state.clone());
         let echo_broadcast_service =
             EchoBroadcast::new(handshake_service, echo_bcast_handle, state);
         let result = echo_broadcast_service.oneshot(message).await;
