@@ -20,14 +20,14 @@ use super::connection::{ConnectionResult, ConnectionResultSender};
 use super::membership::ReliableSenderMap;
 use super::protocol::message_id_generator::MessageId;
 use super::protocol::message_id_generator::MessageIdGenerator;
-use super::protocol::{Broadcast, NetworkMessage};
+use super::protocol::NetworkMessage;
 use crate::node::protocol::Message;
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::error::Error;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 
 pub mod service;
 
@@ -184,26 +184,19 @@ pub(crate) struct EchoBroadcastHandle {
     sender: mpsc::Sender<EchoBroadcastMessage>,
 }
 
-/// Start the echo broadcast actor by listening to any messages on the
-/// receiver channel
-pub async fn start_echo_broadcast() -> EchoBroadcastHandle {
-    let (tx, rx) = mpsc::channel(512);
-    let mut actor = EchoBroadcastActor::start(rx);
-    tokio::spawn(async move {
-        while let Some(message) = actor.command_receiver.recv().await {
-            actor.handle_message(message).await;
-        }
-    });
-    EchoBroadcastHandle { sender: tx }
-}
-
 /// Handle for the echo broadcast actor
 impl EchoBroadcastHandle {
-    pub fn start(
-        message_id_generator: MessageIdGenerator,
-        actor_tx: mpsc::Sender<EchoBroadcastMessage>,
-    ) -> Self {
-        Self { sender: actor_tx }
+    /// Start the echo broadcast actor by listening to any messages on the
+    /// receiver channel
+    pub async fn start() -> Self {
+        let (tx, rx) = mpsc::channel(512);
+        let mut actor = EchoBroadcastActor::start(rx);
+        tokio::spawn(async move {
+            while let Some(message) = actor.command_receiver.recv().await {
+                actor.handle_message(message).await;
+            }
+        });
+        Self { sender: tx }
     }
 
     /// Keep the same signature to send, so we can convert that into a Trait later if we want.
@@ -237,12 +230,23 @@ impl EchoBroadcastHandle {
     }
 }
 
+mockall::mock! {
+    pub EchoBroadcastHandle{
+        pub async fn start() -> Self;
+        pub async fn send(&self, message: Message, members: ReliableSenderMap) -> ConnectionResult<()>;
+        pub async fn receive(&self, message: Message, message_id: MessageId) -> ConnectionResult<()>;
+    }
+
+    impl Clone for EchoBroadcastHandle {
+        fn clone(&self) -> Self;
+    }
+}
+
 #[cfg(test)]
 mod echo_broadcast_actor_tests {
-    use futures::FutureExt;
-
     use super::*;
-    use crate::node::protocol::RoundOnePackageMessage;
+    use crate::node::protocol::{Broadcast, RoundOnePackageMessage};
+    use futures::FutureExt;
 
     #[tokio::test]
     async fn it_should_create_actor_with_echos_setup() {
@@ -331,7 +335,7 @@ mod echo_broadcast_actor_tests {
             ("a".to_string(), first_reliable_sender_handle),
             ("b".to_string(), second_reliable_sender_handle),
         ]);
-        let echo_bcast_handle = start_echo_broadcast().await;
+        let echo_bcast_handle = EchoBroadcastHandle::start().await;
 
         let result = echo_bcast_handle.send(msg, reliable_senders_map).await;
         assert!(result.is_err());

@@ -16,8 +16,9 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use self::echo_broadcast::{start_echo_broadcast, EchoBroadcastHandle};
-use self::protocol::{Broadcast, RoundOnePackage};
+#[mockall_double::double]
+use self::echo_broadcast::EchoBroadcastHandle;
+use self::protocol::Broadcast;
 use self::{membership::MembershipHandle, protocol::Message};
 use crate::node::echo_broadcast::service::EchoBroadcast;
 use crate::node::protocol::{MembershipMessage, RoundOnePackageMessage};
@@ -67,16 +68,17 @@ impl Node {
     pub async fn new() -> Self {
         let bind_address = "localhost".to_string();
         let message_id_generator = MessageIdGenerator::new(bind_address.clone());
-        let echo_broadcast_handle = start_echo_broadcast().await;
+        let echo_broadcast_handle = EchoBroadcastHandle::start().await;
+        let state = State {
+            membership_handle: MembershipHandle::start(bind_address.clone()).await,
+            message_id_generator,
+        };
         Node {
             seeds: vec!["localhost:6680".to_string()],
             bind_address: bind_address.clone(),
             static_key_pem: String::new(),
             delivery_timeout: 500,
-            state: State {
-                membership_handle: MembershipHandle::start(bind_address).await,
-                message_id_generator,
-            },
+            state,
             echo_broadcast_handle,
         }
     }
@@ -385,7 +387,7 @@ impl Node {
 
         let protocol_service = protocol::Protocol::new(node_id.clone(), state.clone());
         let echo_broadcast_service =
-            EchoBroadcast::new(protocol_service, echo_broadcast_handle.clone(), state);
+            EchoBroadcast::new(protocol_service, echo_broadcast_handle, state);
         let timeout_layer =
             tower::timeout::TimeoutLayer::new(tokio::time::Duration::from_millis(timeout));
         let _ = timeout_layer
@@ -397,22 +399,30 @@ impl Node {
 
 #[cfg(test)]
 mod node_tests {
-    use super::{membership, Node};
+    use super::Node;
+    #[mockall_double::double]
+    use crate::node::echo_broadcast::EchoBroadcastHandle;
     use crate::node::membership::MembershipHandle;
-    use crate::node::protocol::message_id_generator::MessageIdGenerator;
-    use crate::node::protocol::{Message, PingMessage};
+    use crate::node::protocol::message_id_generator::{MessageId, MessageIdGenerator};
+    use crate::node::protocol::{Message, PingMessage, RoundOnePackageMessage};
     #[mockall_double::double]
     use crate::node::reliable_sender::ReliableSenderHandle;
     use futures::FutureExt;
 
     #[tokio::test]
     async fn it_should_return_well_formed_node_id() {
+        let ctx = EchoBroadcastHandle::start_context();
+        ctx.expect().returning(|| EchoBroadcastHandle::default());
+
         let node = Node::new().await;
         assert_eq!(node.get_node_id(), "localhost");
     }
 
     #[tokio::test]
-    async fn it_should_create_nodew_with_config() {
+    async fn it_should_create_node_with_config() {
+        let ctx = EchoBroadcastHandle::start_context();
+        ctx.expect().returning(|| EchoBroadcastHandle::default());
+
         let node = Node::new()
             .await
             .seeds(vec![
@@ -433,6 +443,9 @@ mod node_tests {
 
     #[tokio::test]
     async fn it_should_start_listen_without_error() {
+        let ctx = EchoBroadcastHandle::start_context();
+        ctx.expect().returning(|| EchoBroadcastHandle::default());
+
         mockall::mock! {
             TcpListener{}
         }
@@ -442,6 +455,9 @@ mod node_tests {
 
     #[tokio::test]
     async fn it_should_respond_to_unicast_messages() {
+        let ctx = EchoBroadcastHandle::start_context();
+        ctx.expect().returning(|| EchoBroadcastHandle::default());
+
         let unicast_message: Message = PingMessage::default().into();
         let mut reliable_sender_handle = ReliableSenderHandle::default();
 
@@ -461,6 +477,35 @@ mod node_tests {
             100,
             unicast_message,
             reliable_sender_handle,
+            state,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn it_should_respond_to_broadcast_messages() {
+        let ctx = EchoBroadcastHandle::start_context();
+        ctx.expect().returning(|| EchoBroadcastHandle::default());
+
+        let broadcast_message = crate::node::protocol::Broadcast::RoundOnePackage(
+            RoundOnePackageMessage::new("local".into(), "hello".into()),
+            Some(MessageId(1)),
+        );
+        let mut echo_broadcast_handle = EchoBroadcastHandle::default();
+        echo_broadcast_handle
+            .expect_clone()
+            .returning(EchoBroadcastHandle::default);
+        echo_broadcast_handle
+            .expect_send()
+            .return_once(|_, _| Ok(()));
+
+        let membership_handle = MembershipHandle::start("local".into()).await;
+        let state = super::State::new(membership_handle, MessageIdGenerator::new("local".into()));
+        let res = Node::respond_to_broadcast_message(
+            "local".into(),
+            100,
+            broadcast_message,
+            echo_broadcast_handle,
             state,
         )
         .await;

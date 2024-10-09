@@ -16,7 +16,8 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use crate::node::echo_broadcast::{EchoBroadcastHandle, EchoBroadcastMessage};
+#[mockall_double::double]
+use crate::node::echo_broadcast::EchoBroadcastHandle;
 use crate::node::protocol::Message;
 use crate::node::state::State;
 use futures::Future;
@@ -85,7 +86,8 @@ mod echo_broadcast_service_tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::node::echo_broadcast::start_echo_broadcast;
+    #[mockall_double::double]
+    use crate::node::echo_broadcast::EchoBroadcastHandle;
     use crate::node::membership::MembershipHandle;
     use crate::node::protocol::message_id_generator::MessageIdGenerator;
     use crate::node::protocol::{HeartbeatMessage, Protocol};
@@ -105,7 +107,10 @@ mod echo_broadcast_service_tests {
             .await;
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
         let state = State::new(membership_handle, message_id_generator);
-        let echo_bcast_handle = start_echo_broadcast().await;
+        let mut echo_bcast_handle = EchoBroadcastHandle::default();
+        echo_bcast_handle
+            .expect_clone()
+            .returning(EchoBroadcastHandle::default);
         let message = HeartbeatMessage {
             sender_id: "localhost".into(),
             time: SystemTime::now(),
