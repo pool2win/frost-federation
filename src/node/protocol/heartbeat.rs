@@ -15,7 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with Braidpool. If not, see <https://www.gnu.org/licenses/>.
 
-use super::Message;
+use super::{Message, Unicast};
 use futures::{Future, FutureExt};
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
@@ -46,7 +46,7 @@ impl HeartbeatMessage {
 
 #[derive(Debug, Clone)]
 pub struct Heartbeat {
-    sender_id: String,
+    pub sender_id: String,
 }
 
 impl Heartbeat {
@@ -72,15 +72,18 @@ impl Service<Message> for Heartbeat {
         let self_sender_id = self.sender_id.clone();
         async move {
             match msg {
-                Message::Heartbeat(HeartbeatMessage { sender_id, time }) => {
-                    match sender_id.as_str() {
-                        "" => Ok(Some(Message::Heartbeat(HeartbeatMessage {
+                Message::UnicastMessage(Unicast::Heartbeat(HeartbeatMessage {
+                    sender_id,
+                    time,
+                })) => match sender_id.as_str() {
+                    "" => Ok(Some(Message::UnicastMessage(Unicast::Heartbeat(
+                        HeartbeatMessage {
                             time: SystemTime::now(),
                             sender_id: self_sender_id,
-                        }))),
-                        _ => Ok(None),
-                    }
-                }
+                        },
+                    )))),
+                    _ => Ok(None),
+                },
                 _ => Ok(None),
             }
         }
@@ -91,7 +94,7 @@ impl Service<Message> for Heartbeat {
 #[cfg(test)]
 mod heartbeat_tests {
 
-    use crate::node::protocol::{Heartbeat, HeartbeatMessage, Message};
+    use crate::node::protocol::{Heartbeat, HeartbeatMessage, Message, Unicast};
     use std::time::SystemTime;
     use tower::{Service, ServiceExt};
 
@@ -115,7 +118,7 @@ mod heartbeat_tests {
         let mut p = Heartbeat {
             sender_id: "local".to_string(),
         };
-        if let Some(Message::Heartbeat(msg)) = p
+        if let Some(Message::UnicastMessage(Unicast::Heartbeat(msg))) = p
             .ready()
             .await
             .unwrap()
@@ -138,10 +141,12 @@ mod heartbeat_tests {
             .ready()
             .await
             .unwrap()
-            .call(Message::Heartbeat(HeartbeatMessage {
-                sender_id: "local".to_string(),
-                time: SystemTime::now(),
-            }))
+            .call(Message::UnicastMessage(Unicast::Heartbeat(
+                HeartbeatMessage {
+                    sender_id: "local".to_string(),
+                    time: SystemTime::now(),
+                },
+            )))
             .await
             .unwrap();
         assert!(res.is_none());

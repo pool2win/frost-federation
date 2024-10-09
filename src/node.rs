@@ -17,9 +17,10 @@
 // <https://www.gnu.org/licenses/>.
 
 use self::echo_broadcast::{start_echo_broadcast, EchoBroadcastHandle};
+use self::protocol::{Broadcast, RoundOnePackage};
 use self::{membership::MembershipHandle, protocol::Message};
 use crate::node::echo_broadcast::service::EchoBroadcast;
-use crate::node::protocol::PingMessage;
+use crate::node::protocol::{MembershipMessage, RoundOnePackageMessage};
 use crate::node::reliable_sender::service::ReliableSend;
 use crate::node::reliable_sender::ReliableNetworkMessage;
 #[mockall_double::double]
@@ -66,7 +67,7 @@ impl Node {
     pub async fn new() -> Self {
         let bind_address = "localhost".to_string();
         let message_id_generator = MessageIdGenerator::new(bind_address.clone());
-        let echo_broadcast_handle = start_echo_broadcast(message_id_generator).await;
+        let echo_broadcast_handle = start_echo_broadcast().await;
         Node {
             seeds: vec!["localhost:6680".to_string()],
             bind_address: bind_address.clone(),
@@ -74,6 +75,7 @@ impl Node {
             delivery_timeout: 500,
             state: State {
                 membership_handle: MembershipHandle::start(bind_address).await,
+                message_id_generator,
             },
             echo_broadcast_handle,
         }
@@ -165,14 +167,15 @@ impl Node {
             let noise = NoiseHandler::new(initiator, self.static_key_pem.clone());
             let (connection_handle, connection_receiver) =
                 ConnectionHandle::start(reader, writer, noise, initiator).await;
-            let (reliable_sender_handle, application_receiver) = self
+            let (reliable_sender_handle, client_receiver) = self
                 .start_reliable_sender_receiver(connection_handle, connection_receiver)
                 .await;
             let _ = self
                 .start_connection_event_loop(
                     socket_addr.to_string(),
                     reliable_sender_handle.clone(),
-                    application_receiver,
+                    client_receiver,
+                    self.echo_broadcast_handle.clone(),
                 )
                 .await;
             if self
@@ -185,9 +188,10 @@ impl Node {
                 log::debug!("Error adding new connection to membership. Stopping.");
                 return;
             }
+
             let node_id = self.get_node_id();
 
-            // let handshake_service = protocol::Protocol::new(node_id.clone());
+            // let handshake_service = protocol::Protocol::new(node_id.clone(), self.state.clone());
             // let reliable_sender_service =
             //     ReliableSend::new(handshake_service, reliable_sender_handle.clone());
             // let timeout_layer = tower::timeout::TimeoutLayer::new(
@@ -200,15 +204,51 @@ impl Node {
 
             // log::info!("Handshake finished");
 
-            let ping_service = protocol::Protocol::new(node_id.clone());
+            let round_one_service = protocol::Protocol::new(node_id.clone(), self.state.clone());
             let echo_broadcast_service = EchoBroadcast::new(
-                ping_service,
+                round_one_service,
                 self.echo_broadcast_handle.clone(),
                 self.state.clone(),
             );
+
+            log::info!("Sending echo broadcast");
+
             let _ = echo_broadcast_service
-                .oneshot(PingMessage::default().into())
+                .oneshot(
+                    RoundOnePackageMessage::new(
+                        self.get_node_id(),
+                        "hello from round one package".into(),
+                    )
+                    .into(),
+                )
                 .await;
+
+            log::info!("Echo broadcast finished");
+            // let _ = self.send_membership(reliable_sender_handle).await;
+        }
+    }
+
+    pub(crate) async fn send_membership(&self, sender: ReliableSenderHandle) {
+        log::info!("Sending membership information");
+        match self.state.membership_handle.get_members().await {
+            Err(_) => {
+                log::debug!("Error reading membership");
+            }
+            Ok(members) => {
+                let members_name = members.into_keys().collect();
+                let protocol_service =
+                    protocol::Protocol::new(self.get_node_id().clone(), self.state.clone());
+                let reliable_sender_service = ReliableSend::new(protocol_service, sender);
+                let timeout_layer = tower::timeout::TimeoutLayer::new(
+                    tokio::time::Duration::from_millis(self.delivery_timeout),
+                );
+                let _ = timeout_layer
+                    .layer(reliable_sender_service)
+                    .oneshot(
+                        MembershipMessage::new(self.get_node_id().clone(), members_name).into(),
+                    )
+                    .await;
+            }
         }
     }
 
@@ -226,14 +266,15 @@ impl Node {
                 let noise = NoiseHandler::new(init, self.static_key_pem.clone());
                 let (connection_handle, connection_receiver) =
                     ConnectionHandle::start(reader, writer, noise, init).await;
-                let (reliable_sender_handle, application_receiver) = self
+                let (reliable_sender_handle, client_receiver) = self
                     .start_reliable_sender_receiver(connection_handle, connection_receiver)
                     .await;
                 let _ = self
                     .start_connection_event_loop(
                         peer_addr.to_string(),
                         reliable_sender_handle.clone(),
-                        application_receiver,
+                        client_receiver,
+                        self.echo_broadcast_handle.clone(),
                     )
                     .await;
                 if self
@@ -258,36 +299,100 @@ impl Node {
         connection_handle: ConnectionHandle,
         connection_receiver: Receiver<ReliableNetworkMessage>,
     ) -> (ReliableSenderHandle, Receiver<Message>) {
-        let (application_receiver, reliable_sender_handle) =
+        let (client_receiver, reliable_sender_handle) =
             ReliableSenderHandle::start(connection_handle, connection_receiver).await;
-        (reliable_sender_handle, application_receiver)
+        (reliable_sender_handle, client_receiver)
     }
 
     pub async fn start_connection_event_loop(
         &self,
         addr: String,
         reliable_sender_handle: ReliableSenderHandle,
-        mut application_receiver: Receiver<Message>,
+        mut client_receiver: Receiver<Message>,
+        echo_broadcast_handle: EchoBroadcastHandle,
     ) {
         let membership_handle = self.state.membership_handle.clone();
         let node_id = self.get_node_id();
         let timeout = self.delivery_timeout;
+        let state = self.state.clone();
+
         tokio::spawn(async move {
-            while let Some(message) = application_receiver.recv().await {
-                log::debug!("Application message received {:?}", message);
-                let protocol_service = protocol::Protocol::new(node_id.clone());
-                let reliable_sender_service =
-                    ReliableSend::new(protocol_service, reliable_sender_handle.clone());
-                let timeout_layer =
-                    tower::timeout::TimeoutLayer::new(tokio::time::Duration::from_millis(timeout));
-                let _ = timeout_layer
-                    .layer(reliable_sender_service)
-                    .oneshot(message)
-                    .await;
+            while let Some(message) = client_receiver.recv().await {
+                match message {
+                    Message::UnicastMessage(unicast_message) => {
+                        log::debug!("Unicast message received {:?}", unicast_message);
+                        Node::respond_to_unicast_message(
+                            node_id.clone(),
+                            timeout,
+                            Message::UnicastMessage(unicast_message),
+                            reliable_sender_handle.clone(),
+                            state.clone(),
+                        )
+                        .await;
+                    }
+                    Message::BroadcastMessage(broadcast_message) => {
+                        log::debug!("Broadcast message received {:?}", broadcast_message);
+                        Node::respond_to_broadcast_message(
+                            node_id.clone(),
+                            timeout,
+                            broadcast_message,
+                            echo_broadcast_handle.clone(),
+                            state.clone(),
+                        )
+                        .await;
+                    }
+                }
             }
             log::debug!("Connection clean up");
             let _ = membership_handle.remove_member(addr).await;
         });
+    }
+
+    async fn respond_to_unicast_message(
+        node_id: String,
+        timeout: u64,
+        message: Message,
+        reliable_sender_handle: ReliableSenderHandle,
+        state: State,
+    ) {
+        let protocol_service = protocol::Protocol::new(node_id.clone(), state);
+        let reliable_sender_service =
+            ReliableSend::new(protocol_service, reliable_sender_handle.clone());
+        let timeout_layer =
+            tower::timeout::TimeoutLayer::new(tokio::time::Duration::from_millis(timeout));
+        let _ = timeout_layer
+            .layer(reliable_sender_service)
+            .oneshot(message)
+            .await;
+    }
+
+    async fn respond_to_broadcast_message(
+        node_id: String,
+        timeout: u64,
+        message: Broadcast,
+        echo_broadcast_handle: EchoBroadcastHandle,
+        state: State,
+    ) {
+        log::debug!("service responding to broadcast message {:?}", message);
+        // log::debug!("responding to message id {:?}", mid);
+        // TODO - This could cause the echo to go to new
+        // members who didn't receive the initial
+        // broadcast. Make sure they ignore such a message
+        // as a benign error.
+        let members = state.membership_handle.get_members().await.unwrap();
+        let _ = echo_broadcast_handle
+            .send(message.clone().into(), members)
+            .await;
+
+        let protocol_service = protocol::Protocol::new(node_id.clone(), state.clone());
+        let echo_broadcast_service =
+            EchoBroadcast::new(protocol_service, echo_broadcast_handle.clone(), state);
+        let timeout_layer =
+            tower::timeout::TimeoutLayer::new(tokio::time::Duration::from_millis(timeout));
+        let _ = timeout_layer
+            .layer(echo_broadcast_service)
+            .oneshot(message.into())
+            .await;
     }
 }
 

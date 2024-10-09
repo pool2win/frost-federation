@@ -18,16 +18,16 @@
 
 use super::connection::{ConnectionResult, ConnectionResultSender};
 use super::membership::ReliableSenderMap;
+use super::protocol::message_id_generator::MessageId;
 use super::protocol::message_id_generator::MessageIdGenerator;
-use super::protocol::message_id_generator::{self, MessageId};
-use super::protocol::NetworkMessage;
+use super::protocol::{Broadcast, NetworkMessage};
 use crate::node::protocol::Message;
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::error::Error;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 pub mod service;
 
@@ -37,13 +37,11 @@ type EchosMap = HashMap<MessageId, HashMap<String, bool>>;
 pub(crate) enum EchoBroadcastMessage {
     Send {
         data: Message,
-        message_id: MessageId,
         members: ReliableSenderMap,
         respond_to: ConnectionResultSender,
     },
     Echo {
-        data: Message, // TODO: this can be taken away, so only the message_id acts as an ack/echo
-        message_id: MessageId,
+        data: Message,
     },
 }
 
@@ -74,16 +72,13 @@ impl EchoBroadcastActor {
         match message {
             EchoBroadcastMessage::Send {
                 data,
-                message_id,
                 respond_to,
                 members,
             } => {
-                let _ = self
-                    .send_message(data, message_id, members, respond_to)
-                    .await;
+                let _ = self.send_message(data, members, respond_to).await;
             }
-            EchoBroadcastMessage::Echo { data, message_id } => {
-                self.handle_received_echo(data, message_id).await;
+            EchoBroadcastMessage::Echo { data } => {
+                self.handle_received_echo(data).await;
             }
         }
     }
@@ -97,7 +92,6 @@ impl EchoBroadcastActor {
     pub async fn send_message(
         &mut self,
         data: Message,
-        message_id: MessageId,
         members: ReliableSenderMap,
         respond_to: ConnectionResultSender,
     ) -> Result<(), Box<dyn Error + Sync + Send>>
@@ -105,6 +99,7 @@ impl EchoBroadcastActor {
         Message: NetworkMessage + Serialize,
     {
         let sender_id = data.get_sender_id();
+        let message_id = data.get_message_id().unwrap();
         for (member, reliable_sender) in &members {
             if reliable_sender.send(data.clone()).await.is_err() {
                 log::debug!("Error in reliable sender send...");
@@ -154,11 +149,12 @@ impl EchoBroadcastActor {
     }
 
     /// Handle Echo messages received for this message
-    pub async fn handle_received_echo(&mut self, data: Message, message_id: MessageId)
+    pub async fn handle_received_echo(&mut self, data: Message)
     where
         Message: NetworkMessage + Serialize,
     {
         let sender_id = data.get_sender_id();
+        let message_id = data.get_message_id().unwrap();
 
         self.add_echo(&message_id, sender_id.clone());
 
@@ -186,12 +182,11 @@ impl EchoBroadcastActor {
 #[derive(Clone)]
 pub(crate) struct EchoBroadcastHandle {
     sender: mpsc::Sender<EchoBroadcastMessage>,
-    message_id_generator: MessageIdGenerator,
 }
 
 /// Start the echo broadcast actor by listening to any messages on the
 /// receiver channel
-pub async fn start_echo_broadcast(message_id_generator: MessageIdGenerator) -> EchoBroadcastHandle {
+pub async fn start_echo_broadcast() -> EchoBroadcastHandle {
     let (tx, rx) = mpsc::channel(512);
     let mut actor = EchoBroadcastActor::start(rx);
     tokio::spawn(async move {
@@ -199,10 +194,7 @@ pub async fn start_echo_broadcast(message_id_generator: MessageIdGenerator) -> E
             actor.handle_message(message).await;
         }
     });
-    EchoBroadcastHandle {
-        sender: tx,
-        message_id_generator,
-    }
+    EchoBroadcastHandle { sender: tx }
 }
 
 /// Handle for the echo broadcast actor
@@ -211,10 +203,7 @@ impl EchoBroadcastHandle {
         message_id_generator: MessageIdGenerator,
         actor_tx: mpsc::Sender<EchoBroadcastMessage>,
     ) -> Self {
-        Self {
-            sender: actor_tx,
-            message_id_generator,
-        }
+        Self { sender: actor_tx }
     }
 
     /// Keep the same signature to send, so we can convert that into a Trait later if we want.
@@ -222,7 +211,6 @@ impl EchoBroadcastHandle {
         let (sender_from_actor, receiver_from_actor) = oneshot::channel();
         let msg = EchoBroadcastMessage::Send {
             data: message,
-            message_id: self.message_id_generator.next(),
             members,
             respond_to: sender_from_actor,
         };
@@ -237,6 +225,16 @@ impl EchoBroadcastHandle {
             Ok(())
         }
     }
+
+    /// Receive an echo broadcast message from connection
+    /// Pass this to the actor, which will respond to the echo
+    pub async fn receive(&self, message: Message, message_id: MessageId) -> ConnectionResult<()> {
+        let msg = EchoBroadcastMessage::Echo { data: message };
+        if self.sender.send(msg).await.is_err() {
+            return Err("Failed to send receive to echo broadcast actor".into());
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -244,13 +242,11 @@ mod echo_broadcast_actor_tests {
     use futures::FutureExt;
 
     use super::*;
-    use crate::node::protocol::PingMessage;
+    use crate::node::protocol::RoundOnePackageMessage;
 
     #[tokio::test]
     async fn it_should_create_actor_with_echos_setup() {
         let (_sender, receiver) = mpsc::channel(32);
-        let reliable_sender = ReliableSenderHandle::default();
-        // let reliable_senders_map = HashMap::from([("a".to_string(), reliable_sender)]);
         let actor = EchoBroadcastActor::start(receiver);
         assert_eq!(actor.message_echos.keys().count(), 0);
     }
@@ -269,13 +265,16 @@ mod echo_broadcast_actor_tests {
 
         let mut actor = EchoBroadcastActor::start(receiver);
 
-        let data = Message::Ping(PingMessage {
-            sender_id: "localhost".to_string(),
-            message: "ping".to_string(),
-        });
+        let msg = Message::BroadcastMessage(Broadcast::RoundOnePackage(
+            RoundOnePackageMessage {
+                sender_id: "localhost".to_string(),
+                message: "ping".to_string(),
+            },
+            Some(MessageId(1)),
+        ));
 
         let result = actor
-            .send_message(data, MessageId(0), reliable_senders_map, respond_to)
+            .send_message(msg, reliable_senders_map, respond_to)
             .await;
         assert!(result.is_ok());
     }
@@ -294,13 +293,16 @@ mod echo_broadcast_actor_tests {
 
         let mut actor = EchoBroadcastActor::start(receiver);
 
-        let data = Message::Ping(PingMessage {
-            sender_id: "localhost".to_string(),
-            message: "ping".to_string(),
-        });
+        let msg = Message::BroadcastMessage(Broadcast::RoundOnePackage(
+            RoundOnePackageMessage {
+                sender_id: "localhost".to_string(),
+                message: "ping".to_string(),
+            },
+            Some(MessageId(1)),
+        ));
 
         let result = actor
-            .send_message(data, MessageId(0), reliable_senders_map, respond_to)
+            .send_message(msg, reliable_senders_map, respond_to)
             .await;
         assert!(result.is_err());
     }
@@ -310,10 +312,13 @@ mod echo_broadcast_actor_tests {
         let mut first_reliable_sender_handle = ReliableSenderHandle::default();
         let mut second_reliable_sender_handle = ReliableSenderHandle::default();
 
-        let msg = Message::Ping(PingMessage {
-            sender_id: "localhost".to_string(),
-            message: "ping".to_string(),
-        });
+        let msg = Message::BroadcastMessage(Broadcast::RoundOnePackage(
+            RoundOnePackageMessage {
+                sender_id: "localhost".to_string(),
+                message: "ping".to_string(),
+            },
+            Some(MessageId(1)),
+        ));
 
         first_reliable_sender_handle
             .expect_send()
@@ -326,8 +331,7 @@ mod echo_broadcast_actor_tests {
             ("a".to_string(), first_reliable_sender_handle),
             ("b".to_string(), second_reliable_sender_handle),
         ]);
-        let message_id_generator = MessageIdGenerator::new("localhost".to_string());
-        let echo_bcast_handle = start_echo_broadcast(message_id_generator).await;
+        let echo_bcast_handle = start_echo_broadcast().await;
 
         let result = echo_bcast_handle.send(msg, reliable_senders_map).await;
         assert!(result.is_err());
@@ -354,15 +358,15 @@ mod echo_broadcast_actor_tests {
         let (_sender, receiver) = mpsc::channel(32);
         let mut echo_bcast_actor = EchoBroadcastActor::start(receiver);
 
-        let ping_msg = Message::Ping(PingMessage {
-            sender_id: "localhost".to_string(),
-            message: "ping".to_string(),
-        });
+        let msg = Message::BroadcastMessage(Broadcast::RoundOnePackage(
+            RoundOnePackageMessage {
+                sender_id: "localhost".to_string(),
+                message: "ping".to_string(),
+            },
+            Some(MessageId(1)),
+        ));
 
-        let msg = EchoBroadcastMessage::Echo {
-            data: ping_msg,
-            message_id: MessageId(1),
-        };
+        let msg = EchoBroadcastMessage::Echo { data: msg };
 
         let _result = echo_bcast_actor.handle_message(msg).await;
         assert_eq!(echo_bcast_actor.message_echos.len(), 1);
@@ -417,13 +421,15 @@ mod echo_broadcast_actor_tests {
         let (_sender, receiver) = mpsc::channel(32);
         let mut echo_bcast_actor = EchoBroadcastActor::start(receiver);
 
-        let ping_msg = Message::Ping(PingMessage {
+        let msg = RoundOnePackageMessage {
             sender_id: "localhost".to_string(),
-            message: "ping".to_string(),
-        });
+            message: "round one package".to_string(),
+        };
+        let broadcast_message =
+            Message::BroadcastMessage(Broadcast::RoundOnePackage(msg, Some(MessageId(1))));
 
         echo_bcast_actor
-            .handle_received_echo(ping_msg, MessageId(1))
+            .handle_received_echo(broadcast_message)
             .await;
 
         assert_eq!(echo_bcast_actor.message_echos.len(), 1);
@@ -458,40 +464,39 @@ mod echo_broadcast_actor_tests {
         let (msg_sender, msg_receiver) = oneshot::channel();
         let mut echo_bcast_actor = EchoBroadcastActor::start(receiver);
 
-        let ping_msg = Message::Ping(PingMessage {
-            sender_id: "localhost".to_string(),
-            message: "ping".to_string(),
-        });
+        let msg: Message = Message::BroadcastMessage(Broadcast::RoundOnePackage(
+            RoundOnePackageMessage {
+                sender_id: "localhost".to_string(),
+                message: "round one package".to_string(),
+            },
+            Some(MessageId(1)),
+        ));
 
         let result = echo_bcast_actor
-            .send_message(
-                ping_msg.clone(),
-                MessageId(1),
-                reliable_senders_map,
-                msg_sender,
-            )
+            .send_message(msg.clone(), reliable_senders_map, msg_sender)
             .await;
 
         assert!(result.is_ok());
         assert_eq!(echo_bcast_actor.message_client_txs.len(), 1);
 
-        let echo_b = Message::Ping(PingMessage {
-            sender_id: "b".to_string(),
-            message: "ping".to_string(),
-        });
+        let echo_b: Message = Message::BroadcastMessage(Broadcast::RoundOnePackage(
+            RoundOnePackageMessage {
+                sender_id: "b".to_string(),
+                message: "round one package".to_string(),
+            },
+            Some(MessageId(1)),
+        ));
+        let echo_c: Message = Message::BroadcastMessage(Broadcast::RoundOnePackage(
+            RoundOnePackageMessage {
+                sender_id: "c".to_string(),
+                message: "round one package".to_string(),
+            },
+            Some(MessageId(1)),
+        ));
 
-        let echo_c = Message::Ping(PingMessage {
-            sender_id: "c".to_string(),
-            message: "ping".to_string(),
-        });
+        echo_bcast_actor.handle_received_echo(echo_b).await;
 
-        echo_bcast_actor
-            .handle_received_echo(echo_b, MessageId(1))
-            .await;
-
-        echo_bcast_actor
-            .handle_received_echo(echo_c, MessageId(1))
-            .await;
+        echo_bcast_actor.handle_received_echo(echo_c).await;
 
         assert!(msg_receiver.await.is_ok());
     }
