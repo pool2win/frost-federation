@@ -1,3 +1,14 @@
+== Build and Coverage
+
+[link=https://github.com/pool2win/frost-federation/actions/workflows/tests.yml]
+image::https://github.com/pool2win/frost-federation/actions/workflows/tests.yml/badge.svg[Rust CI]
+[link=https://codecov.io/gh/pool2win/frost-federation]
+image::https://codecov.io/gh/pool2win/frost-federation/graph/badge.svg?token=W3FWIFM232[Codecov]
+
+Note: Rust code coverage misses lines. We are sharing links to the
+report for transparency.
+
+
 == FROST Federation
 
 A federation of nodes running FROST to generate threshold signatures
@@ -7,21 +18,22 @@ The federation also saves and synchronises data and commands sent by
 clients. The federation then runs a priori known validation scheme on
 the data before generating a threshold signature.
 
-== System Model
+=== DKG and TSS
 
-=== Network Connectivity
+We are using the KeyGen and TSS as defined in the FROST paper. We add
+an additional round of reliable byzantine broadcast to provide
+agreement in the round 2 of the KeyGen protocol. See
+https://github.com/ZcashFoundation/frost/issues/577[discussion] on the
+ZCash FROST repository for details.
+
+More on TSS as we get closer to adding support for it.
+
+== System Model
 
 . A federation of nodes with point to point network connectivity.
 . All point to point connections are authenticated and confidential using the Noise framework.
 . All point to point connections are reliable with no ordering guarantees.
 . Provide an echo-broadcast implementation between all nodes to satisfy the FROST broadcast channel requirements.
-. Clocks are synchronised using ntp to satisfy partial synchrony requirements.
-
-=== Round Time
-
-. Round time of 5 seconds [TODO: Determine this if this is enough for
-a network of size 100 nodes, and then adjust this as required]
-
 
 == Federation Clients
 
@@ -30,26 +42,14 @@ a network of size 100 nodes, and then adjust this as required]
 
 == Threshold Signatures
 
-. The federation runs preprocessing DKG rounds every fixed interval.
+. The federation runs preprocessing DKG rounds every fixed interval or when a new member joins.
+.. Membership is not a simple problem and we depend on the Bitcoin consensus for it. Membership is determined by keys that control inputs into a bitcoin transaction that spends to a key federation's DKG key.
+.. To join the federation, an applicant provides such an input and sends a request to all members of the existing federation. The federation signals the willingness to accept the new member by running a DKG protocol to generate a new key for the federation. Members do not run a DKG protocol more than once every two weeks. This prevents DDoS attacks and frequent changes to membership.
+.. The new membership is confirmed by creating a new bitcoin transaction that spends all the member inputs to a federation public key.
 . Threshold signatures are generated Whenever a client requests a one or the federation needs one.
 
-=== Validate Before Signing
+== Validate Before Signing
 
-. The federation is provided a validation protocol it runs on the synchronised data, before it generates a threshold signature.
+. The federation will run an application dependent validation protocol on the synchronised data. Members locally run validation using only the data available locally. Members then run the threshold signature protocol only after they have validated their local view of the data.
+. Signing also provides an agreement that members are signing the same data. If data is different, the signing operation will fail.
 . This allows clients to use the federation as a BFT validation and signature generation service.
-
-== Build Status
-
-[link=https://github.com/pool2win/frost-federation/actions/workflows/tests.yml]
-image::https://github.com/pool2win/frost-federation/actions/workflows/tests.yml/badge.svg[Rust CI]
-
-== Coverage
-
-Note: Rust code coverage misses a lot of lines. We still share links to the report for transparency
-
-[link=https://codecov.io/gh/pool2win/frost-federation]
-image::https://codecov.io/gh/pool2win/frost-federation/graph/badge.svg?token=W3FWIFM232[Codecov]
-
-[link=https://codecov.io/gh/pool2win/frost-federation]
-image::https://codecov.io/gh/pool2win/frost-federation/graphs/icicle.svg?token=W3FWIFM232[Codecov]
-
