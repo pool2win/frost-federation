@@ -68,7 +68,6 @@ impl Service<Message> for Membership {
     /// node when anyone connects to it.
     fn call(&mut self, msg: Message) -> Self::Future {
         let state = self.state.clone();
-        log::debug!("MSG {:?}", msg);
         async move {
             match msg {
                 Message::UnicastMessage(Unicast::Membership(MembershipMessage {
