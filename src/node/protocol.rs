@@ -168,7 +168,7 @@ impl Service<Message> for Protocol {
                     BoxService::new(Heartbeat::new(sender_id))
                 }
                 Message::UnicastMessage(Unicast::Membership(_m)) => {
-                    BoxService::new(Membership::new(sender_id))
+                    BoxService::new(Membership::new(sender_id, state))
                 }
                 Message::BroadcastMessage(Broadcast::RoundOnePackage(_m, _)) => {
                     BoxService::new(RoundOnePackage::new(sender_id, state))
