@@ -405,7 +405,7 @@ mod node_tests {
     #[tokio::test]
     async fn it_should_return_well_formed_node_id() {
         let ctx = EchoBroadcastHandle::start_context();
-        ctx.expect().returning(|| EchoBroadcastHandle::default());
+        ctx.expect().returning(EchoBroadcastHandle::default);
 
         let node = Node::new().await;
         assert_eq!(node.get_node_id(), "localhost");
@@ -414,7 +414,7 @@ mod node_tests {
     #[tokio::test]
     async fn it_should_create_node_with_config() {
         let ctx = EchoBroadcastHandle::start_context();
-        ctx.expect().returning(|| EchoBroadcastHandle::default());
+        ctx.expect().returning(EchoBroadcastHandle::default);
 
         let node = Node::new()
             .await
@@ -437,7 +437,7 @@ mod node_tests {
     #[tokio::test]
     async fn it_should_start_listen_without_error() {
         let ctx = EchoBroadcastHandle::start_context();
-        ctx.expect().returning(|| EchoBroadcastHandle::default());
+        ctx.expect().returning(EchoBroadcastHandle::default);
 
         mockall::mock! {
             TcpListener{}
@@ -449,7 +449,7 @@ mod node_tests {
     #[tokio::test]
     async fn it_should_respond_to_unicast_messages() {
         let ctx = EchoBroadcastHandle::start_context();
-        ctx.expect().returning(|| EchoBroadcastHandle::default());
+        ctx.expect().returning(EchoBroadcastHandle::default);
 
         let unicast_message: Message = PingMessage::default().into();
         let mut reliable_sender_handle = ReliableSenderHandle::default();
@@ -478,7 +478,7 @@ mod node_tests {
     #[tokio::test]
     async fn it_should_respond_to_broadcast_messages() {
         let ctx = EchoBroadcastHandle::start_context();
-        ctx.expect().returning(|| EchoBroadcastHandle::default());
+        ctx.expect().returning(EchoBroadcastHandle::default);
 
         let broadcast_message = crate::node::protocol::Broadcast::RoundOnePackage(
             RoundOnePackageMessage::new("local".into(), "hello".into()),
