@@ -22,6 +22,7 @@ use std::error::Error;
 use frost_federation::cli;
 use frost_federation::config;
 use frost_federation::node;
+use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -33,6 +34,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     setup_logging()?;
     setup_tracing()?;
 
+    let (_, command_rx) = mpsc::channel(10);
     let mut node = node::Node::new()
         .await
         .seeds(config.peer.seeds)
@@ -40,7 +42,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .static_key_pem(config.noise.key)
         .delivery_timeout(config.peer.delivery_timeout);
 
-    if node.start().await.is_err() {
+    if node.start(command_rx).await.is_err() {
         return Err("Stopping node".into());
     }
     Ok(())
