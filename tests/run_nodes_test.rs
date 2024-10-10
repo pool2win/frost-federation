@@ -21,7 +21,9 @@ use frost_federation::node;
 
 #[test]
 fn test_start_a_single_node_should_complete_without_error() {
+    use tokio::sync::mpsc;
     use tokio::time::{timeout, Duration};
+
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -30,6 +32,7 @@ fn test_start_a_single_node_should_complete_without_error() {
             let config = config::load_config_from_file("config.run".to_string()).unwrap();
             let bind_address = config::get_bind_address(config.network);
 
+            let (_, command_rx) = mpsc::channel(10);
             let mut node = node::Node::new()
                 .await
                 .seeds(config.peer.seeds)
@@ -37,6 +40,6 @@ fn test_start_a_single_node_should_complete_without_error() {
                 .static_key_pem(config.noise.key)
                 .delivery_timeout(config.peer.delivery_timeout);
 
-            let _ = timeout(Duration::from_millis(10), node.start()).await;
+            let _ = timeout(Duration::from_millis(10), node.start(command_rx)).await;
         });
 }
