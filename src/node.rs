@@ -31,6 +31,7 @@ use crate::node::{
     noise_handler::{NoiseHandler, NoiseIO},
     protocol::HandshakeMessage,
 };
+use commands::Commands;
 #[mockall_double::double]
 use connection::ConnectionHandle;
 use protocol::message_id_generator::MessageIdGenerator;
@@ -46,6 +47,7 @@ use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tower::Layer;
 use tower::ServiceExt;
 
+mod commands;
 mod connection;
 mod echo_broadcast;
 mod membership;
@@ -116,7 +118,10 @@ impl Node {
     }
 
     /// Start node by listening, accepting and connecting to peers
-    pub async fn start(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn start(
+        &mut self,
+        command_rx: Receiver<String>,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         log::debug!("Starting...");
         if self.connect_to_seeds().await.is_err() {
             return Err("Connecting to seeds failed.".into());
@@ -125,7 +130,15 @@ impl Node {
         if listener.is_err() {
             return Err("Error starting listen".into());
         } else {
-            self.start_accept(listener.unwrap()).await;
+            let accept_task = self.start_accept(listener.unwrap());
+            let command_task = self.start_command_loop(command_rx);
+            // Stop node when accept returns or Command asks us to stop.
+            tokio::select! {
+                _ = accept_task => {
+                },
+                _ = command_task => {
+                }
+            };
         }
         Ok(())
     }
@@ -158,7 +171,7 @@ impl Node {
     }
 
     /// Start accepting connections
-    pub async fn start_accept(&mut self, listener: TcpListener) {
+    pub async fn start_accept(&self, listener: TcpListener) {
         log::debug!("Start accepting...");
         let initiator = true;
         loop {
