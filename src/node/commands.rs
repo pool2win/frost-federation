@@ -29,10 +29,9 @@ impl Commands for Node {
     /// Command event loop receives commands from RPC
     async fn start_command_loop(&self, mut command_rx: mpsc::Receiver<String>) {
         while let Some(msg) = command_rx.recv().await {
-            println!("Received {:?}", msg);
             match msg.as_str() {
                 "shutdown" => {
-                    println!("Shutting down....");
+                    log::info!("Shutting down....");
                     return;
                 }
                 _ => {}
