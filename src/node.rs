@@ -29,7 +29,7 @@ use crate::node::reliable_sender::ReliableNetworkMessage;
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
 use crate::node::state::State;
-use commands::Commands;
+use commands::{Command, Commands};
 #[mockall_double::double]
 use connection::ConnectionHandle;
 use protocol::message_id_generator::MessageIdGenerator;
@@ -45,7 +45,7 @@ use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tower::Layer;
 use tower::ServiceExt;
 
-mod commands;
+pub mod commands;
 mod connection;
 mod echo_broadcast;
 mod membership;
@@ -116,17 +116,15 @@ impl Node {
     }
 
     /// Start node by listening, accepting and connecting to peers
-    pub async fn start(
-        &mut self,
-        command_rx: Receiver<String>,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub async fn start(&mut self, command_rx: Receiver<Command>) {
         log::debug!("Starting...");
         if self.connect_to_seeds().await.is_err() {
-            return Err("Connecting to seeds failed.".into());
+            log::info!("Connecting to seeds failed.");
+            return;
         }
         let listener = self.listen().await;
         if listener.is_err() {
-            return Err("Error starting listen".into());
+            log::info!("Error starting listen");
         } else {
             let accept_task = self.start_accept(listener.unwrap());
             let command_task = self.start_command_loop(command_rx);
@@ -138,7 +136,17 @@ impl Node {
                 }
             };
         }
-        Ok(())
+    }
+
+    /// Returns the bind address for all the nodes connected to this node
+    pub async fn get_members(&self) -> Result<Vec<String>, Box<dyn Error + Send>> {
+        match self.state.membership_handle.get_members().await {
+            Ok(membership) => Ok(membership.into_keys().collect()),
+            Err(_) => Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Error getting members",
+            ))),
+        }
     }
 
     /// Start listening

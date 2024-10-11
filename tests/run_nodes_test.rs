@@ -16,30 +16,54 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use frost_federation::config;
 use frost_federation::node;
+use futures::TryFutureExt;
 
 #[test]
-fn test_start_a_single_node_should_complete_without_error() {
-    use tokio::sync::mpsc;
-    use tokio::time::{timeout, Duration};
+fn test_start_two_nodes_and_let_them_connect_without_an_error() {
+    use crate::node::commands::CommandExecutor;
 
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap()
         .block_on(async {
-            let config = config::load_config_from_file("config.run".to_string()).unwrap();
-            let bind_address = config::get_bind_address(config.network);
 
-            let (_, command_rx) = mpsc::channel(10);
+            let mut node_b = node::Node::new()
+                .await
+                .seeds(vec!["localhost:6880".into()])
+                .bind_address("localhost:6881".into())
+                .static_key_pem("MFECAQEwBQYDK2VwBCIEIPCN4nC8Zn9jEKBc4jiUCPcHNdqQ8WgpyUv09eKJHSxfgSEAtJysJ2e6m4ze8Kz1zYjBByVR4EO/7iGRkTtd7cYOGi0=".into())
+                .delivery_timeout(100);
+
+
+            let (executor_b, command_rx_b) = CommandExecutor::new();
+            let node_b_task = node_b.start(command_rx_b);
+
             let mut node = node::Node::new()
                 .await
-                .seeds(config.peer.seeds)
-                .bind_address(bind_address)
-                .static_key_pem(config.noise.key)
-                .delivery_timeout(config.peer.delivery_timeout);
+                .seeds(vec![])
+                .bind_address("localhost:6880".into())
+                .static_key_pem("MFECAQEwBQYDK2VwBCIEIJ7pILqR7yBPsVuysfGyofjOEm19skmtqcJYWiVwjKH1gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=".into())
+                .delivery_timeout(100);
 
-            let _ = timeout(Duration::from_millis(10), node.start(command_rx)).await;
+            let (_executor, command_rx) = CommandExecutor::new();
+            let node_task = node.start(command_rx);
+                                
+            tokio::spawn(            
+                async move {
+                    while let Ok(members) = executor_b.get_members().await {                    
+                        if members.len() == 1 {
+                            assert_eq!(members.len(), 1);
+                            let _ = executor_b.shutdown().await;
+                    }
+                }});
+
+            tokio::select! {
+                _ = node_task => {}
+                _ = node_b_task => {}
+            }
+            
         });
+
 }
