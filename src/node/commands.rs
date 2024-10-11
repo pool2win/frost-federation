@@ -16,43 +16,76 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use tokio::sync::mpsc;
-
 use crate::node::Node;
+use std::error::Error;
+use tokio::sync::{mpsc, oneshot};
+
+pub enum Command {
+    Shutdown,
+    GetMembers {
+        respond_to: oneshot::Sender<Result<Vec<String>, Box<dyn Error + Send>>>,
+    },
+}
+
+#[derive(Clone)]
+pub struct CommandExecutor {
+    tx: mpsc::Sender<Command>,
+}
+
+impl CommandExecutor {
+    pub fn new() -> (Self, mpsc::Receiver<Command>) {
+        let (tx, rx) = mpsc::channel(10);
+        (Self { tx }, rx)
+    }
+
+    pub async fn shutdown(&self) {
+        let _ = self.tx.send(Command::Shutdown).await;
+    }
+
+    pub async fn get_members(&self) -> Result<Vec<String>, Box<dyn Error + Send>> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.tx.send(Command::GetMembers { respond_to: tx }).await;
+        rx.await.unwrap()
+    }
+}
 
 /// Trait for commands interface to Node
-pub trait Commands {
-    async fn start_command_loop(&self, command_rx: mpsc::Receiver<String>);
+pub(crate) trait Commands {
+    async fn start_command_loop(&self, command_rx: mpsc::Receiver<Command>);
 }
 
 impl Commands for Node {
     /// Command event loop receives commands from RPC
-    async fn start_command_loop(&self, mut command_rx: mpsc::Receiver<String>) {
+    async fn start_command_loop(&self, mut command_rx: mpsc::Receiver<Command>) {
+        log::debug!("Starting command loop....");
         while let Some(msg) = command_rx.recv().await {
-            match msg.as_str() {
-                "shutdown" => {
+            match msg {
+                Command::Shutdown => {
                     log::info!("Shutting down....");
                     return;
                 }
-                _ => {}
+                Command::GetMembers { respond_to } => {
+                    let _ = respond_to.send(self.get_members().await);
+                }
             }
         }
+        log::debug!("Stopping command loop....");
     }
 }
 
 #[cfg(test)]
 mod command_tests {
+    use super::CommandExecutor;
     use super::Node;
     #[mockall_double::double]
     use crate::node::echo_broadcast::EchoBroadcastHandle;
-    use tokio::sync::mpsc;
 
     #[tokio::test]
     async fn it_should_run_node_with_command_rx() {
         let ctx = EchoBroadcastHandle::start_context();
         ctx.expect().returning(EchoBroadcastHandle::default);
 
-        let (command_tx, command_rx) = mpsc::channel(10);
+        let (exector, command_rx) = CommandExecutor::new();
         let mut node = Node::new()
             .await
             .seeds(vec![])
@@ -61,10 +94,8 @@ mod command_tests {
             .delivery_timeout(1000);
 
         let node_task = node.start(command_rx);
-        // Node stays up for a non-shutdown command
-        let _ = command_tx.send("test command".into()).await;
         // Node shuts down on shutdown command
-        let _ = command_tx.send("shutdown".into()).await;
-        let _ = tokio::join!(node_task);
+        let _ = exector.shutdown().await;
+        node_task.await;
     }
 }
