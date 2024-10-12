@@ -312,34 +312,42 @@ impl Node {
         let state = self.state.clone();
 
         tokio::spawn(async move {
-            while let Some(message) = client_receiver.recv().await {
-                match message {
-                    Message::UnicastMessage(unicast_message) => {
-                        log::debug!("Unicast message received {:?}", unicast_message);
-                        Node::respond_to_unicast_message(
-                            node_id.clone(),
-                            timeout,
-                            Message::UnicastMessage(unicast_message),
-                            reliable_sender_handle.clone(),
-                            state.clone(),
-                        )
-                        .await;
-                    }
-                    Message::BroadcastMessage(broadcast_message) => {
-                        log::debug!("Broadcast message received {:?}", broadcast_message);
-                        Node::respond_to_broadcast_message(
-                            node_id.clone(),
-                            timeout,
-                            broadcast_message,
-                            echo_broadcast_handle.clone(),
-                            state.clone(),
-                        )
-                        .await;
+            loop {
+                let connection_message = client_receiver.recv().await;
+                match connection_message {
+                    Some(message) => match message {
+                        Message::UnicastMessage(unicast_message) => {
+                            log::debug!("Unicast message received {:?}", unicast_message);
+                            Node::respond_to_unicast_message(
+                                node_id.clone(),
+                                timeout,
+                                Message::UnicastMessage(unicast_message),
+                                reliable_sender_handle.clone(),
+                                state.clone(),
+                            )
+                            .await;
+                        }
+                        Message::BroadcastMessage(broadcast_message) => {
+                            log::debug!("Broadcast message received {:?}", broadcast_message);
+                            Node::respond_to_broadcast_message(
+                                node_id.clone(),
+                                timeout,
+                                broadcast_message,
+                                echo_broadcast_handle.clone(),
+                                state.clone(),
+                            )
+                            .await;
+                        }
+                    },
+                    _ => {
+                        log::info!("Connection clean up");
+                        if membership_handle.remove_member(addr).await.is_ok() {
+                            log::info!("Member removed");
+                        }
+                        return;
                     }
                 }
             }
-            log::debug!("Connection clean up");
-            let _ = membership_handle.remove_member(addr).await;
         });
     }
 
