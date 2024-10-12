@@ -376,16 +376,11 @@ impl Node {
         state: State,
     ) {
         log::debug!("service responding to broadcast message {:?}", message);
-        // log::debug!("responding to message id {:?}", mid);
         // TODO - This could cause the echo to go to new
         // members who didn't receive the initial
         // broadcast. Make sure they ignore such a message
         // as a benign error.
         let members = state.membership_handle.get_members().await.unwrap();
-        let _ = echo_broadcast_handle
-            .send(message.clone().into(), members)
-            .await;
-
         let protocol_service = protocol::Protocol::new(node_id.clone(), state.clone());
         let echo_broadcast_service =
             EchoBroadcast::new(protocol_service, echo_broadcast_handle, state);
