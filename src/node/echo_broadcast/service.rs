@@ -66,6 +66,7 @@ where
             let response_message = this.inner.call(msg).await;
             match response_message {
                 Ok(Some(msg)) => {
+                    log::debug!("Sending echo broadcast with message {:?}", msg);
                     let members = this.state.membership_handle.get_members().await.unwrap();
                     if this.handle.send(msg, members).await.is_ok() {
                         Ok(())

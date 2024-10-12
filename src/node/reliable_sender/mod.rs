@@ -159,16 +159,27 @@ async fn start_reliable_sender(mut actor: ReliableSenderActor) {
             Some(msg) = actor.receiver.recv() => {
                 if let Err(e) = actor.handle_message(msg).await {
                     log::info!("Error handling message from client. Shutting down. {}", e);
+                    return
                 }
             },
-            Some(msg) = actor.connection_receiver.recv() => {
-                log::debug!("Received message from connection {:?}", msg);
-                if let Err(e) = actor.handle_connection_message(msg).await {
-                    log::info!("Error handling received message. Shutting down. {}", e);
+            connection_msg = actor.connection_receiver.recv() => {
+                match connection_msg {
+                    Some(msg) => {
+                        log::debug!("Received message from connection {:?}", msg);
+                        if let Err(e) = actor.handle_connection_message(msg).await {
+                            log::info!("Error handling received message. Shutting down. {}", e);
+                            return
+                        }
+                    },
+                    None => {
+                        log::info!("Connection closed. Stopping reliable sender");
+                        return
+                    }
                 }
             },
             else => {
                 log::info!("Bad message for reliable sender actor");
+                return
             }
         }
     }
