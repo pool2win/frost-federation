@@ -70,28 +70,27 @@ impl Service<Message> for Membership {
         let state = self.state.clone();
         async move {
             match msg {
-                Message::Unicast(Unicast::Membership(MembershipMessage {
-                    message,
-                    sender_id,
-                })) => match message {
-                    None => {
-                        let members = state
-                            .membership_handle
-                            .get_members()
-                            .await
-                            .unwrap()
-                            .into_keys()
-                            .collect();
-                        Ok(Some(
-                            MembershipMessage {
-                                sender_id,
-                                message: Some(members),
-                            }
-                            .into(),
-                        ))
+                Message::Unicast(Unicast::Membership(MembershipMessage { message, sender_id })) => {
+                    match message {
+                        None => {
+                            let members = state
+                                .membership_handle
+                                .get_members()
+                                .await
+                                .unwrap()
+                                .into_keys()
+                                .collect();
+                            Ok(Some(
+                                MembershipMessage {
+                                    sender_id,
+                                    message: Some(members),
+                                }
+                                .into(),
+                            ))
+                        }
+                        _ => Ok(None),
                     }
-                    _ => Ok(None),
-                },
+                }
                 _ => Ok(None),
             }
         }
