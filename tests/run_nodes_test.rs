@@ -16,19 +16,19 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use frost_federation::node;
-use futures::TryFutureExt;
+mod node_integration_tests {
 
-#[test]
-fn test_start_two_nodes_and_let_them_connect_without_an_error() {
-    use crate::node::commands::CommandExecutor;
+    use frost_federation::node;
 
-    tokio::runtime::Builder::new_current_thread()
+    #[test]
+    fn test_start_two_nodes_and_let_them_connect_without_an_error() {
+        use frost_federation::node::commands::CommandExecutor;
+
+        tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap()
         .block_on(async {
-
             let mut node_b = node::Node::new()
                 .await
                 .seeds(vec!["localhost:6880".into()])
@@ -49,21 +49,17 @@ fn test_start_two_nodes_and_let_them_connect_without_an_error() {
 
             let (_executor, command_rx) = CommandExecutor::new();
             let node_task = node.start(command_rx);
-                                
-            tokio::spawn(            
-                async move {
-                    while let Ok(members) = executor_b.get_members().await {                    
-                        if members.len() == 1 {
-                            assert_eq!(members.len(), 1);
-                            let _ = executor_b.shutdown().await;
+            tokio::spawn(async move {
+                while let Ok(members) = executor_b.get_members().await {
+                    if members.len() == 1 {
+                        assert_eq!(members.len(), 1);
+                        let _ = executor_b.shutdown().await;
                     }
                 }});
-
             tokio::select! {
                 _ = node_task => {}
                 _ = node_b_task => {}
             }
-            
         });
-
+    }
 }
