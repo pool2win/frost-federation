@@ -33,7 +33,7 @@ pub mod service;
 type EchosMap = HashMap<MessageId, HashMap<String, bool>>;
 
 /// Message types for echo broadcast actor -> handle communication
-pub(crate) enum EchoBroadcast {
+pub(crate) enum EchoBroadcastMessage {
     Send {
         data: Message,
         members: ReliableSenderMap,
@@ -56,7 +56,7 @@ pub(crate) struct EchoBroadcastActor {
     /// A map from message id to the members in a map: message id -> [node id -> [reliable sender handles]]
     reliable_senders: HashMap<MessageId, ReliableSenderMap>,
     /// RX for actor to receive requests on
-    command_receiver: mpsc::Receiver<EchoBroadcast>,
+    command_receiver: mpsc::Receiver<EchoBroadcastMessage>,
     /// Map of echo messages received from the nodes in membership when this broadcast was initiated
     message_echos: EchosMap,
     /// TX for the message id's echo broadcast to finish
@@ -64,7 +64,7 @@ pub(crate) struct EchoBroadcastActor {
 }
 
 impl EchoBroadcastActor {
-    pub fn start(receiver: mpsc::Receiver<EchoBroadcast>) -> Self {
+    pub fn start(receiver: mpsc::Receiver<EchoBroadcastMessage>) -> Self {
         Self {
             command_receiver: receiver,
             message_echos: EchosMap::new(),
@@ -73,16 +73,16 @@ impl EchoBroadcastActor {
         }
     }
 
-    pub async fn handle_message(&mut self, message: EchoBroadcast) {
+    pub async fn handle_message(&mut self, message: EchoBroadcastMessage) {
         match message {
-            EchoBroadcast::Send {
+            EchoBroadcastMessage::Send {
                 data,
                 respond_to,
                 members,
             } => {
                 let _ = self.send_message(data, members, respond_to).await;
             }
-            EchoBroadcast::EchoSend {
+            EchoBroadcastMessage::EchoSend {
                 data,
                 members,
                 respond_to,
@@ -90,7 +90,7 @@ impl EchoBroadcastActor {
                 // send echo to all members
                 let _ = self.send_message(data.clone(), members, respond_to).await;
             }
-            EchoBroadcast::EchoReceive { data, peer_addr } => {
+            EchoBroadcastMessage::EchoReceive { data, peer_addr } => {
                 // manage echo data structures and confirm delivered
                 log::debug!("Handle received echo in actor");
                 self.handle_received_echo(data, peer_addr).await;
@@ -196,7 +196,7 @@ impl EchoBroadcastActor {
 /// broadcast was originally sent.
 #[derive(Clone)]
 pub(crate) struct EchoBroadcastHandle {
-    sender: mpsc::Sender<EchoBroadcast>,
+    sender: mpsc::Sender<EchoBroadcastMessage>,
 }
 
 /// Handle for the echo broadcast actor
@@ -217,7 +217,7 @@ impl EchoBroadcastHandle {
     /// Keep the same signature to send, so we can convert that into a Trait later if we want.
     pub async fn send(&self, message: Message, members: ReliableSenderMap) -> ConnectionResult<()> {
         let (sender_from_actor, receiver_from_actor) = oneshot::channel();
-        let msg = EchoBroadcast::Send {
+        let msg = EchoBroadcastMessage::Send {
             data: message,
             members,
             respond_to: sender_from_actor,
@@ -245,7 +245,7 @@ impl EchoBroadcastHandle {
         members: ReliableSenderMap,
     ) -> ConnectionResult<()> {
         let (sender_from_actor, receiver_from_actor) = oneshot::channel();
-        let msg = EchoBroadcast::EchoSend {
+        let msg = EchoBroadcastMessage::EchoSend {
             data: message,
             members,
             respond_to: sender_from_actor,
@@ -265,7 +265,7 @@ impl EchoBroadcastHandle {
     /// Receive an echo broadcast message from connection
     /// Pass this to the actor, which will respond to the echo
     pub async fn receive_echo(&self, message: Message, peer_addr: String) -> ConnectionResult<()> {
-        let msg = EchoBroadcast::EchoReceive {
+        let msg = EchoBroadcastMessage::EchoReceive {
             data: message,
             peer_addr,
         };
@@ -417,7 +417,7 @@ mod echo_broadcast_actor_tests {
             MessageId(1),
         );
 
-        let msg = EchoBroadcast::EchoReceive {
+        let msg = EchoBroadcastMessage::EchoReceive {
             data: msg,
             peer_addr: "a".into(),
         };

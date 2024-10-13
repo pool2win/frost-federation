@@ -21,16 +21,14 @@ use self::echo_broadcast::EchoBroadcastHandle;
 use self::protocol::BroadcastProtocol;
 use self::{membership::MembershipHandle, protocol::Message};
 use crate::node::echo_broadcast::service::EchoBroadcast;
+use crate::node::noise_handler::{NoiseHandler, NoiseIO};
+use crate::node::protocol::init::initialize;
 use crate::node::protocol::{MembershipMessage, RoundOnePackageMessage};
 use crate::node::reliable_sender::service::ReliableSend;
 use crate::node::reliable_sender::ReliableNetworkMessage;
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
 use crate::node::state::State;
-use crate::node::{
-    noise_handler::{NoiseHandler, NoiseIO},
-    protocol::HandshakeMessage,
-};
 #[mockall_double::double]
 use connection::ConnectionHandle;
 use protocol::message_id_generator::MessageIdGenerator;
@@ -192,60 +190,21 @@ impl Node {
             }
 
             let node_id = self.get_node_id();
-
-            // let handshake_service = protocol::Protocol::new(node_id.clone(), self.state.clone());
-            // let reliable_sender_service =
-            //     ReliableSend::new(handshake_service, reliable_sender_handle.clone());
-            // let timeout_layer = tower::timeout::TimeoutLayer::new(
-            //     tokio::time::Duration::from_millis(self.delivery_timeout),
-            // );
-            // let _ = timeout_layer
-            //     .layer(reliable_sender_service)
-            //     .oneshot(HandshakeMessage::default().into())
-            //     .await;
-
-            // log::info!("Handshake finished");
-
-            let round_one_service = protocol::Protocol::new(node_id.clone(), self.state.clone());
-            let echo_broadcast_service = EchoBroadcast::new(
-                round_one_service,
-                self.echo_broadcast_handle.clone(),
-                self.state.clone(),
-                self.get_node_id(),
-            );
-
-            log::info!("Sending echo broadcast");
-
-            let _ = echo_broadcast_service
-                .oneshot(
-                    RoundOnePackageMessage::new(
-                        self.get_node_id(),
-                        "hello from round one package".into(),
-                    )
-                    .into(),
+            let state = self.state.clone();
+            let echo_broadcast_handle = self.echo_broadcast_handle.clone();
+            let delivery_timeout = self.delivery_timeout;
+            let reliable_sender_handle = reliable_sender_handle.clone();
+            tokio::spawn(async move {
+                let _ = initialize(
+                    node_id,
+                    state,
+                    echo_broadcast_handle,
+                    reliable_sender_handle,
+                    delivery_timeout,
                 )
                 .await;
-
-            log::info!("Echo broadcast finished");
-            let _ = self.send_membership(reliable_sender_handle).await;
-
-            log::info!("Membership sent");
+            });
         }
-    }
-
-    pub(crate) async fn send_membership(&self, sender: ReliableSenderHandle) {
-        log::info!("Sending membership information");
-        let protocol_service =
-            protocol::Protocol::new(self.get_node_id().clone(), self.state.clone());
-        let reliable_sender_service = ReliableSend::new(protocol_service, sender);
-        let timeout_layer = tower::timeout::TimeoutLayer::new(tokio::time::Duration::from_millis(
-            self.delivery_timeout,
-        ));
-        let res = timeout_layer
-            .layer(reliable_sender_service)
-            .oneshot(MembershipMessage::new(self.get_node_id().clone(), None).into())
-            .await;
-        log::debug!("Membership sending result {:?}", res);
     }
 
     /// Connect to all peers and start reader writer tasks
