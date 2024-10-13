@@ -72,18 +72,17 @@ impl Service<Message> for Heartbeat {
         let self_sender_id = self.sender_id.clone();
         async move {
             match msg {
-                Message::Unicast(Unicast::Heartbeat(HeartbeatMessage {
-                    sender_id,
-                    time,
-                })) => match sender_id.as_str() {
-                    "" => Ok(Some(Message::Unicast(Unicast::Heartbeat(
-                        HeartbeatMessage {
-                            time: SystemTime::now(),
-                            sender_id: self_sender_id,
-                        },
-                    )))),
-                    _ => Ok(None),
-                },
+                Message::Unicast(Unicast::Heartbeat(HeartbeatMessage { sender_id, time })) => {
+                    match sender_id.as_str() {
+                        "" => Ok(Some(Message::Unicast(Unicast::Heartbeat(
+                            HeartbeatMessage {
+                                time: SystemTime::now(),
+                                sender_id: self_sender_id,
+                            },
+                        )))),
+                        _ => Ok(None),
+                    }
+                }
                 _ => Ok(None),
             }
         }
@@ -141,12 +140,10 @@ mod heartbeat_tests {
             .ready()
             .await
             .unwrap()
-            .call(Message::Unicast(Unicast::Heartbeat(
-                HeartbeatMessage {
-                    sender_id: "local".to_string(),
-                    time: SystemTime::now(),
-                },
-            )))
+            .call(Message::Unicast(Unicast::Heartbeat(HeartbeatMessage {
+                sender_id: "local".to_string(),
+                time: SystemTime::now(),
+            })))
             .await
             .unwrap();
         assert!(res.is_none());
