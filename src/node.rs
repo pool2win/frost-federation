@@ -18,7 +18,7 @@
 
 #[mockall_double::double]
 use self::echo_broadcast::EchoBroadcastHandle;
-use self::protocol::Broadcast;
+use self::protocol::BroadcastProtocol;
 use self::{membership::MembershipHandle, protocol::Message};
 use crate::node::echo_broadcast::service::EchoBroadcast;
 use crate::node::protocol::{MembershipMessage, RoundOnePackageMessage};
@@ -193,24 +193,25 @@ impl Node {
 
             let node_id = self.get_node_id();
 
-            let handshake_service = protocol::Protocol::new(node_id.clone(), self.state.clone());
-            let reliable_sender_service =
-                ReliableSend::new(handshake_service, reliable_sender_handle.clone());
-            let timeout_layer = tower::timeout::TimeoutLayer::new(
-                tokio::time::Duration::from_millis(self.delivery_timeout),
-            );
-            let _ = timeout_layer
-                .layer(reliable_sender_service)
-                .oneshot(HandshakeMessage::default().into())
-                .await;
+            // let handshake_service = protocol::Protocol::new(node_id.clone(), self.state.clone());
+            // let reliable_sender_service =
+            //     ReliableSend::new(handshake_service, reliable_sender_handle.clone());
+            // let timeout_layer = tower::timeout::TimeoutLayer::new(
+            //     tokio::time::Duration::from_millis(self.delivery_timeout),
+            // );
+            // let _ = timeout_layer
+            //     .layer(reliable_sender_service)
+            //     .oneshot(HandshakeMessage::default().into())
+            //     .await;
 
-            log::info!("Handshake finished");
+            // log::info!("Handshake finished");
 
             let round_one_service = protocol::Protocol::new(node_id.clone(), self.state.clone());
             let echo_broadcast_service = EchoBroadcast::new(
                 round_one_service,
                 self.echo_broadcast_handle.clone(),
                 self.state.clone(),
+                self.get_node_id(),
             );
 
             log::info!("Sending echo broadcast");
@@ -316,27 +317,34 @@ impl Node {
                 let connection_message = client_receiver.recv().await;
                 match connection_message {
                     Some(message) => match message {
-                        Message::UnicastMessage(unicast_message) => {
+                        Message::Unicast(unicast_message) => {
                             log::debug!("Unicast message received {:?}", unicast_message);
                             Node::respond_to_unicast_message(
                                 node_id.clone(),
                                 timeout,
-                                Message::UnicastMessage(unicast_message),
+                                Message::Unicast(unicast_message),
                                 reliable_sender_handle.clone(),
                                 state.clone(),
                             )
                             .await;
                         }
-                        Message::BroadcastMessage(broadcast_message) => {
+                        Message::Broadcast(broadcast_message, mid) => {
                             log::debug!("Broadcast message received {:?}", broadcast_message);
                             Node::respond_to_broadcast_message(
                                 node_id.clone(),
                                 timeout,
-                                broadcast_message,
+                                Message::Broadcast(broadcast_message, mid),
                                 echo_broadcast_handle.clone(),
                                 state.clone(),
                             )
                             .await;
+                        }
+                        Message::Echo(broadcast_message, mid) => {
+                            log::info!("Received echo from network ...");
+                            let echo_message = Message::Echo(broadcast_message, mid.clone());
+                            let _ = echo_broadcast_handle
+                                .receive_echo(echo_message, addr.clone())
+                                .await;
                         }
                     },
                     _ => {
@@ -371,24 +379,23 @@ impl Node {
     async fn respond_to_broadcast_message(
         node_id: String,
         timeout: u64,
-        message: Broadcast,
+        message: Message,
         echo_broadcast_handle: EchoBroadcastHandle,
         state: State,
     ) {
-        log::debug!("service responding to broadcast message {:?}", message);
+        log::debug!("In respond to broadcast message {:?}", message);
         // TODO - This could cause the echo to go to new
         // members who didn't receive the initial
         // broadcast. Make sure they ignore such a message
         // as a benign error.
-        let members = state.membership_handle.get_members().await.unwrap();
         let protocol_service = protocol::Protocol::new(node_id.clone(), state.clone());
         let echo_broadcast_service =
-            EchoBroadcast::new(protocol_service, echo_broadcast_handle, state);
+            EchoBroadcast::new(protocol_service, echo_broadcast_handle, state, node_id);
         let timeout_layer =
             tower::timeout::TimeoutLayer::new(tokio::time::Duration::from_millis(timeout));
         let _ = timeout_layer
             .layer(echo_broadcast_service)
-            .oneshot(message.into())
+            .oneshot(message)
             .await;
     }
 }
@@ -405,10 +412,17 @@ mod node_tests {
     use crate::node::reliable_sender::ReliableSenderHandle;
     use futures::FutureExt;
 
+    // We need to synchronize tests using mocks on Static fns like EchoBroadcastHandle::start
+    // See here: https://docs.rs/mockall/latest/mockall/#static-methods
+    use std::sync::Mutex;
+    static MTX: Mutex<()> = Mutex::new(());
+
     #[tokio::test]
     async fn it_should_return_well_formed_node_id() {
+        let _m = MTX.lock();
+
         let ctx = EchoBroadcastHandle::start_context();
-        ctx.expect().returning(|| EchoBroadcastHandle::default());
+        ctx.expect().returning(EchoBroadcastHandle::default);
 
         let node = Node::new().await;
         assert_eq!(node.get_node_id(), "localhost");
@@ -416,8 +430,10 @@ mod node_tests {
 
     #[tokio::test]
     async fn it_should_create_node_with_config() {
+        let _m = MTX.lock();
+
         let ctx = EchoBroadcastHandle::start_context();
-        ctx.expect().returning(|| EchoBroadcastHandle::default());
+        ctx.expect().returning(EchoBroadcastHandle::default);
 
         let node = Node::new()
             .await
@@ -439,8 +455,10 @@ mod node_tests {
 
     #[tokio::test]
     async fn it_should_start_listen_without_error() {
+        let _m = MTX.lock();
+
         let ctx = EchoBroadcastHandle::start_context();
-        ctx.expect().returning(|| EchoBroadcastHandle::default());
+        ctx.expect().returning(EchoBroadcastHandle::default);
 
         mockall::mock! {
             TcpListener{}
@@ -452,7 +470,7 @@ mod node_tests {
     #[tokio::test]
     async fn it_should_respond_to_unicast_messages() {
         let ctx = EchoBroadcastHandle::start_context();
-        ctx.expect().returning(|| EchoBroadcastHandle::default());
+        ctx.expect().returning(EchoBroadcastHandle::default);
 
         let unicast_message: Message = PingMessage::default().into();
         let mut reliable_sender_handle = ReliableSenderHandle::default();
@@ -481,26 +499,25 @@ mod node_tests {
     #[tokio::test]
     async fn it_should_respond_to_broadcast_messages() {
         let ctx = EchoBroadcastHandle::start_context();
-        ctx.expect().returning(|| EchoBroadcastHandle::default());
+        ctx.expect().returning(EchoBroadcastHandle::default);
 
-        let broadcast_message = crate::node::protocol::Broadcast::RoundOnePackage(
+        let broadcast_message = crate::node::protocol::BroadcastProtocol::RoundOnePackage(
             RoundOnePackageMessage::new("local".into(), "hello".into()),
-            Some(MessageId(1)),
         );
         let mut echo_broadcast_handle = EchoBroadcastHandle::default();
-        echo_broadcast_handle
-            .expect_clone()
-            .returning(EchoBroadcastHandle::default);
-        echo_broadcast_handle
-            .expect_send()
-            .return_once(|_, _| Ok(()));
+        echo_broadcast_handle.expect_clone().returning(|| {
+            let mut mocked = EchoBroadcastHandle::default();
+            mocked.expect_send().return_once(|_, _| Ok(()));
+            mocked.expect_send_echo().return_once(|_, _| Ok(()));
+            mocked
+        });
 
         let membership_handle = MembershipHandle::start("local".into()).await;
         let state = super::State::new(membership_handle, MessageIdGenerator::new("local".into()));
         let res = Node::respond_to_broadcast_message(
             "local".into(),
             100,
-            broadcast_message,
+            Message::Broadcast(broadcast_message, Some(MessageId(1))),
             echo_broadcast_handle,
             state,
         )

@@ -72,11 +72,11 @@ impl Service<Message> for Heartbeat {
         let self_sender_id = self.sender_id.clone();
         async move {
             match msg {
-                Message::UnicastMessage(Unicast::Heartbeat(HeartbeatMessage {
+                Message::Unicast(Unicast::Heartbeat(HeartbeatMessage {
                     sender_id,
                     time,
                 })) => match sender_id.as_str() {
-                    "" => Ok(Some(Message::UnicastMessage(Unicast::Heartbeat(
+                    "" => Ok(Some(Message::Unicast(Unicast::Heartbeat(
                         HeartbeatMessage {
                             time: SystemTime::now(),
                             sender_id: self_sender_id,
@@ -118,7 +118,7 @@ mod heartbeat_tests {
         let mut p = Heartbeat {
             sender_id: "local".to_string(),
         };
-        if let Some(Message::UnicastMessage(Unicast::Heartbeat(msg))) = p
+        if let Some(Message::Unicast(Unicast::Heartbeat(msg))) = p
             .ready()
             .await
             .unwrap()
@@ -141,7 +141,7 @@ mod heartbeat_tests {
             .ready()
             .await
             .unwrap()
-            .call(Message::UnicastMessage(Unicast::Heartbeat(
+            .call(Message::Unicast(Unicast::Heartbeat(
                 HeartbeatMessage {
                     sender_id: "local".to_string(),
                     time: SystemTime::now(),

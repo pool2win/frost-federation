@@ -41,10 +41,10 @@ use tower::{util::BoxService, BoxError, Service, ServiceExt};
 use self::message_id_generator::MessageId;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-#[serde(untagged)]
 pub enum Message {
-    UnicastMessage(Unicast),
-    BroadcastMessage(Broadcast),
+    Unicast(Unicast),
+    Broadcast(BroadcastProtocol, Option<MessageId>),
+    Echo(BroadcastProtocol, MessageId),
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -56,8 +56,8 @@ pub enum Unicast {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-pub enum Broadcast {
-    RoundOnePackage(RoundOnePackageMessage, Option<MessageId>),
+pub enum BroadcastProtocol {
+    RoundOnePackage(RoundOnePackageMessage),
 }
 
 pub trait NetworkMessage {
@@ -70,25 +70,28 @@ impl NetworkMessage for Message {
     /// return the sender_id for all message types
     fn get_sender_id(&self) -> String {
         match self {
-            Message::UnicastMessage(m) => match m {
+            Message::Unicast(m) => match m {
                 Unicast::Handshake(m) => m.sender_id.clone(),
                 Unicast::Heartbeat(m) => m.sender_id.clone(),
                 Unicast::Ping(m) => m.sender_id.clone(),
                 Unicast::Membership(m) => m.sender_id.clone(),
             },
-            Message::BroadcastMessage(m) => match m {
-                Broadcast::RoundOnePackage(m, _) => m.sender_id.clone(),
+            Message::Broadcast(m, _) | Message::Echo(m, _) => match m {
+                BroadcastProtocol::RoundOnePackage(m) => m.sender_id.clone(),
             },
         }
     }
 
-    /// Return the message_id for all message types
+    /// return the message_id for all message types
     /// For now we return the MessageId for Broadcasts. For unicasts, we return None.
     fn get_message_id(&self) -> Option<MessageId> {
         match self {
-            Message::UnicastMessage(_m) => None,
-            Message::BroadcastMessage(m) => match m {
-                Broadcast::RoundOnePackage(_m, mid) => mid.clone(),
+            Message::Unicast(_m) => None,
+            Message::Broadcast(m, mid) => match m {
+                BroadcastProtocol::RoundOnePackage(_m) => mid.clone(),
+            },
+            Message::Echo(m, mid) => match m {
+                BroadcastProtocol::RoundOnePackage(_m) => Some(mid.clone()),
             },
         }
     }
@@ -96,39 +99,39 @@ impl NetworkMessage for Message {
 
 impl From<HeartbeatMessage> for Message {
     fn from(value: HeartbeatMessage) -> Self {
-        Message::UnicastMessage(Unicast::Heartbeat(value))
+        Message::Unicast(Unicast::Heartbeat(value))
     }
 }
 
 impl From<HandshakeMessage> for Message {
     fn from(value: HandshakeMessage) -> Self {
-        Message::UnicastMessage(Unicast::Handshake(value))
+        Message::Unicast(Unicast::Handshake(value))
     }
 }
 
 impl From<PingMessage> for Message {
     fn from(value: PingMessage) -> Self {
-        Message::UnicastMessage(Unicast::Ping(value))
+        Message::Unicast(Unicast::Ping(value))
     }
 }
 
 impl From<MembershipMessage> for Message {
     fn from(value: MembershipMessage) -> Self {
-        Message::UnicastMessage(Unicast::Membership(value))
+        Message::Unicast(Unicast::Membership(value))
     }
 }
 
 impl From<RoundOnePackageMessage> for Message {
     fn from(value: RoundOnePackageMessage) -> Self {
-        Message::BroadcastMessage(Broadcast::RoundOnePackage(value, None))
+        Message::Broadcast(BroadcastProtocol::RoundOnePackage(value), None)
     }
 }
 
-impl From<Broadcast> for Message {
-    fn from(value: Broadcast) -> Self {
+impl From<BroadcastProtocol> for Message {
+    fn from(value: BroadcastProtocol) -> Self {
         match value {
-            Broadcast::RoundOnePackage(m, message_id) => {
-                Message::BroadcastMessage(Broadcast::RoundOnePackage(m, message_id))
+            BroadcastProtocol::RoundOnePackage(m) => {
+                Message::Broadcast(BroadcastProtocol::RoundOnePackage(m), None)
             }
         }
     }
@@ -160,17 +163,20 @@ impl Service<Message> for Protocol {
         let state = self.state.clone();
         async move {
             let svc = match &msg {
-                Message::UnicastMessage(Unicast::Ping(_m)) => BoxService::new(Ping::new(sender_id)),
-                Message::UnicastMessage(Unicast::Handshake(_m)) => {
+                Message::Unicast(Unicast::Ping(_m)) => BoxService::new(Ping::new(sender_id)),
+                Message::Unicast(Unicast::Handshake(_m)) => {
                     BoxService::new(Handshake::new(sender_id))
                 }
-                Message::UnicastMessage(Unicast::Heartbeat(_m)) => {
+                Message::Unicast(Unicast::Heartbeat(_m)) => {
                     BoxService::new(Heartbeat::new(sender_id))
                 }
-                Message::UnicastMessage(Unicast::Membership(_m)) => {
+                Message::Unicast(Unicast::Membership(_m)) => {
                     BoxService::new(Membership::new(sender_id, state))
                 }
-                Message::BroadcastMessage(Broadcast::RoundOnePackage(_m, _)) => {
+                Message::Broadcast(BroadcastProtocol::RoundOnePackage(_m), _) => {
+                    BoxService::new(RoundOnePackage::new(sender_id, state))
+                }
+                Message::Echo(BroadcastProtocol::RoundOnePackage(_m), _) => {
                     BoxService::new(RoundOnePackage::new(sender_id, state))
                 }
             };
