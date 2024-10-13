@@ -18,7 +18,8 @@
 
 #[mockall_double::double]
 use crate::node::echo_broadcast::EchoBroadcastHandle;
-use crate::node::protocol::Message;
+use crate::node::membership::ReliableSenderMap;
+use crate::node::protocol::{BroadcastProtocol, Message, NetworkMessage};
 use crate::node::state::State;
 use futures::Future;
 use std::pin::Pin;
@@ -30,15 +31,17 @@ use tower::{BoxError, Service};
 pub struct EchoBroadcast<S> {
     inner: S,
     state: State,
+    node_id: String,
     handle: EchoBroadcastHandle,
 }
 
 impl<S> EchoBroadcast<S> {
-    pub fn new(svc: S, handle: EchoBroadcastHandle, state: State) -> Self {
+    pub fn new(svc: S, handle: EchoBroadcastHandle, state: State, node_id: String) -> Self {
         EchoBroadcast {
             inner: svc,
-            handle,
             state,
+            node_id,
+            handle,
         }
     }
 }
@@ -63,18 +66,38 @@ where
     fn call(&mut self, msg: Message) -> Self::Future {
         let mut this = self.clone();
         Box::pin(async move {
+            let members = this.state.membership_handle.get_members().await.unwrap();
+            log::debug!("Handling message {:?} in service ...", msg);
+            match msg.clone() {
+                Message::Unicast(_) => {}
+                Message::Echo(..) => {}
+                Message::Broadcast(m, Some(mid)) => {
+                    log::debug!("Generating echo...");
+                    let echo_msg = Message::Echo(m, mid);
+                    log::debug!("Echo message ... {:?}", echo_msg);
+                    this.handle.send_echo(echo_msg, members.clone()).await?;
+                }
+                Message::Broadcast(m, None) => {
+                    log::debug!("Generating message_id for Send...");
+                    let to_send =
+                        Message::Broadcast(m, Some(this.state.message_id_generator.next()));
+                    this.handle.send(to_send, members.clone()).await?;
+                }
+            };
             let response_message = this.inner.call(msg).await;
             match response_message {
                 Ok(Some(msg)) => {
                     log::debug!("Sending echo broadcast with message {:?}", msg);
-                    let members = this.state.membership_handle.get_members().await.unwrap();
                     if this.handle.send(msg, members).await.is_ok() {
                         Ok(())
                     } else {
                         Err("Error sending echo broadcast".into())
                     }
                 }
-                _ => Err("Unknown message type in echo broadcast handle".into()),
+                _ => {
+                    log::info!("No response to send for received broadcast");
+                    Ok(())
+                }
             }
         })
     }
@@ -99,9 +122,11 @@ mod echo_broadcast_service_tests {
     async fn it_should_run_service_without_error() {
         ReliableSenderHandle::default();
         let mut mock_reliable_sender = ReliableSenderHandle::default();
-        mock_reliable_sender
-            .expect_send()
-            .return_once(|_| async { Ok(()) }.boxed());
+        mock_reliable_sender.expect_clone().returning(|| {
+            let mut mock = ReliableSenderHandle::default();
+            mock.expect_send().return_once(|_| async { Ok(()) }.boxed());
+            mock
+        });
         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
         let _ = membership_handle
             .add_member("a".to_string(), mock_reliable_sender)
@@ -109,9 +134,11 @@ mod echo_broadcast_service_tests {
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
         let state = State::new(membership_handle, message_id_generator);
         let mut echo_bcast_handle = EchoBroadcastHandle::default();
-        echo_bcast_handle
-            .expect_clone()
-            .returning(EchoBroadcastHandle::default);
+        echo_bcast_handle.expect_clone().returning(|| {
+            let mut mocked = EchoBroadcastHandle::default();
+            mocked.expect_send_echo().returning(|_, _| Ok(()));
+            mocked
+        });
         let message = HeartbeatMessage {
             sender_id: "localhost".into(),
             time: SystemTime::now(),
@@ -119,9 +146,13 @@ mod echo_broadcast_service_tests {
         .into();
 
         let handshake_service = Protocol::new("localhost".to_string(), state.clone());
-        let echo_broadcast_service =
-            EchoBroadcast::new(handshake_service, echo_bcast_handle, state);
+        let echo_broadcast_service = EchoBroadcast::new(
+            handshake_service,
+            echo_bcast_handle,
+            state,
+            "localhost".into(),
+        );
         let result = echo_broadcast_service.oneshot(message).await;
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 }

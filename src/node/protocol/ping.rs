@@ -63,7 +63,7 @@ impl Service<Message> for Ping {
         let local_sender_id = self.sender_id.clone();
         async move {
             match msg {
-                Message::UnicastMessage(Unicast::Ping(m)) => match m.message.as_str() {
+                Message::Unicast(Unicast::Ping(m)) => match m.message.as_str() {
                     "" => Ok(Some(
                         PingMessage::new(local_sender_id, "ping".to_string()).into(),
                     )),

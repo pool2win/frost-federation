@@ -70,7 +70,7 @@ impl Service<Message> for Membership {
         let state = self.state.clone();
         async move {
             match msg {
-                Message::UnicastMessage(Unicast::Membership(MembershipMessage {
+                Message::Unicast(Unicast::Membership(MembershipMessage {
                     message,
                     sender_id,
                 })) => match message {
