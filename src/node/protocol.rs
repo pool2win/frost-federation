@@ -21,6 +21,7 @@ extern crate serde;
 
 mod handshake;
 mod heartbeat;
+pub mod init;
 mod membership;
 pub(crate) mod message_id_generator;
 mod ping;
