@@ -1,17 +1,10 @@
 coverage:
   status:
     project:
-      default:   # default is the status check's name, not default settings
+      default:
         target: auto
-        threshold: 5
-        base: auto
-        flags:
-          - unit
-        paths:
-          - "src"
-       # advanced settings
-        branches:
-          - master
-        if_ci_failed: error #success, failure, error, ignore
-        informational: true
-        only_pulls: false
+        threshold: 20
+    patch:
+      default:
+        target: auto
+        threshold: 20
