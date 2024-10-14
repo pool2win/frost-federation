@@ -37,7 +37,7 @@ use tokio::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpListener, TcpStream,
     },
-    sync::mpsc,
+    sync::{mpsc, oneshot},
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tower::Layer;
@@ -117,7 +117,7 @@ impl Node {
     pub async fn start(
         &mut self,
         command_rx: mpsc::Receiver<Command>,
-        accept_ready_tx: mpsc::Sender<()>,
+        accept_ready_tx: oneshot::Sender<()>,
     ) {
         log::debug!("Starting... {}", self.bind_address);
         if self.connect_to_seeds().await.is_err() {
@@ -181,14 +181,14 @@ impl Node {
     }
 
     /// Start accepting connections
-    pub async fn start_accept(&self, listener: TcpListener, accept_ready_tx: mpsc::Sender<()>) {
+    pub async fn start_accept(&self, listener: TcpListener, accept_ready_tx: oneshot::Sender<()>) {
         log::debug!("Start accepting...");
         let initiator = true;
+        let _ = accept_ready_tx.send(());
         loop {
             log::debug!("Waiting on accept...");
-            let _ = accept_ready_tx.clone().send(()).await;
             let (stream, socket_addr) = listener.accept().await.unwrap();
-            log::info!("Accept connection from {}", socket_addr);
+            log::debug!("Accept connection from {}", socket_addr);
             let (reader, writer) = self.build_reader_writer(stream);
             let noise = NoiseHandler::new(initiator, self.static_key_pem.clone());
             let (connection_handle, connection_receiver) =

@@ -27,7 +27,7 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
 
     use frost_federation::node::commands::CommandExecutor;
     use frost_federation::node::Node;
-    use tokio::sync::mpsc;
+    use tokio::sync::oneshot;
 
     #[test]
     fn test_start_two_nodes_and_let_them_connect_without_an_error() {
@@ -45,7 +45,7 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
                     .static_key_pem(KEY.into())
                     .delivery_timeout(100);
 
-                let (ready_tx, mut ready_rx) = mpsc::channel(1);
+                let (ready_tx, mut ready_rx) = oneshot::channel();
                 let (_executor, command_rx) = CommandExecutor::new();
                 let node_task = async {
                     node.start(command_rx, ready_tx).await;
@@ -58,10 +58,10 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
                     .static_key_pem(KEY.into())
                     .delivery_timeout(100);
 
-                let (ready_tx_b, mut _ready_rx_b) = mpsc::channel(1);
+                let (ready_tx_b, mut _ready_rx_b) = oneshot::channel();
                 let (executor_b, command_rx_b) = CommandExecutor::new();
                 let node_b_task = async {
-                    let _ = ready_rx.recv().await;
+                    let _ = ready_rx.await;
                     node_b.start(command_rx_b, ready_tx_b).await;
                 };
 
