@@ -18,8 +18,7 @@
 
 #[mockall_double::double]
 use crate::node::echo_broadcast::EchoBroadcastHandle;
-use crate::node::membership::ReliableSenderMap;
-use crate::node::protocol::{BroadcastProtocol, Message, NetworkMessage};
+use crate::node::protocol::Message;
 use crate::node::state::State;
 use futures::Future;
 use std::pin::Pin;

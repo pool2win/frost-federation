@@ -23,7 +23,7 @@ use crate::node::protocol::{MembershipMessage, Protocol, RoundOnePackageMessage}
 use crate::node::reliable_sender::service::ReliableSend;
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
-use crate::node::{reliable_sender, State};
+use crate::node::State;
 
 use tower::{Layer, ServiceExt};
 
