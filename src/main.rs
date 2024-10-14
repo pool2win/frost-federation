@@ -19,7 +19,7 @@
 use clap::Parser;
 use frost_federation::node::commands::CommandExecutor;
 use std::error::Error;
-use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 
 use frost_federation::cli;
 use frost_federation::config;
@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .static_key_pem(config.noise.key)
         .delivery_timeout(config.peer.delivery_timeout);
 
-    let (ready_tx, _ready_rx) = mpsc::channel(1);
+    let (ready_tx, _ready_rx) = oneshot::channel();
     node.start(command_rx, ready_tx).await;
     Ok(())
 }

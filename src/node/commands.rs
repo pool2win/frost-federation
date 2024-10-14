@@ -79,7 +79,7 @@ mod command_tests {
     use super::Node;
     #[mockall_double::double]
     use crate::node::echo_broadcast::EchoBroadcastHandle;
-    use tokio::sync::mpsc;
+    use tokio::sync::oneshot;
 
     #[tokio::test]
     async fn it_should_run_node_with_command_rx() {
@@ -94,7 +94,7 @@ mod command_tests {
             .static_key_pem("a key".to_string())
             .delivery_timeout(1000);
 
-        let (ready_tx, _ready_rx) = mpsc::channel(1);
+        let (ready_tx, _ready_rx) = oneshot::channel();
         let node_task = node.start(command_rx, ready_tx);
         // Node shuts down on shutdown command
         let _ = exector.shutdown().await;
