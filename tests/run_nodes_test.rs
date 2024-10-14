@@ -17,49 +17,67 @@
 // <https://www.gnu.org/licenses/>.
 
 mod node_integration_tests {
+    // Use the same noise public key for all nodes in these tests
+    const KEY: &str = "
+-----BEGIN PRIVATE KEY-----
+MFECAQEwBQYDK2VwBCIEIJ7pILqR7yBPsVuysfGyofjOEm19skmtqcJYWiVwjKH1
+gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
+-----END PRIVATE KEY-----
+";
 
-    use frost_federation::node;
+    use frost_federation::node::commands::CommandExecutor;
+    use frost_federation::node::Node;
+    use tokio::sync::mpsc;
 
     #[test]
     fn test_start_two_nodes_and_let_them_connect_without_an_error() {
-        use frost_federation::node::commands::CommandExecutor;
+        let _ = env_logger::builder().is_test(true).try_init();
 
         tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(async {
-            let mut node_b = node::Node::new()
-                .await
-                .seeds(vec!["localhost:6880".into()])
-                .bind_address("localhost:6881".into())
-                .static_key_pem("MFECAQEwBQYDK2VwBCIEIPCN4nC8Zn9jEKBc4jiUCPcHNdqQ8WgpyUv09eKJHSxfgSEAtJysJ2e6m4ze8Kz1zYjBByVR4EO/7iGRkTtd7cYOGi0=".into())
-                .delivery_timeout(100);
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let mut node = Node::new()
+                    .await
+                    .seeds(vec![])
+                    .bind_address("localhost:6880".into())
+                    .static_key_pem(KEY.into())
+                    .delivery_timeout(100);
 
+                let (ready_tx, mut ready_rx) = mpsc::channel(1);
+                let (_executor, command_rx) = CommandExecutor::new();
+                let node_task = async {
+                    node.start(command_rx, ready_tx).await;
+                };
 
-            let (executor_b, command_rx_b) = CommandExecutor::new();
-            let node_b_task = node_b.start(command_rx_b);
+                let mut node_b = Node::new()
+                    .await
+                    .seeds(vec!["localhost:6880".into()])
+                    .bind_address("localhost:6881".into())
+                    .static_key_pem(KEY.into())
+                    .delivery_timeout(100);
 
-            let mut node = node::Node::new()
-                .await
-                .seeds(vec![])
-                .bind_address("localhost:6880".into())
-                .static_key_pem("MFECAQEwBQYDK2VwBCIEIJ7pILqR7yBPsVuysfGyofjOEm19skmtqcJYWiVwjKH1gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=".into())
-                .delivery_timeout(100);
+                let (ready_tx_b, mut _ready_rx_b) = mpsc::channel(1);
+                let (executor_b, command_rx_b) = CommandExecutor::new();
+                let node_b_task = async {
+                    let _ = ready_rx.recv().await;
+                    node_b.start(command_rx_b, ready_tx_b).await;
+                };
 
-            let (_executor, command_rx) = CommandExecutor::new();
-            let node_task = node.start(command_rx);
-            tokio::spawn(async move {
-                while let Ok(members) = executor_b.get_members().await {
-                    if members.len() == 1 {
-                        assert_eq!(members.len(), 1);
-                        let _ = executor_b.shutdown().await;
+                tokio::spawn(async move {
+                    while let Ok(members) = executor_b.get_members().await {
+                        if members.len() == 1 {
+                            assert_eq!(members.len(), 1);
+                            let _ = executor_b.shutdown().await;
+                        }
                     }
-                }});
-            tokio::select! {
-                _ = node_task => {}
-                _ = node_b_task => {}
-            }
-        });
+                });
+
+                tokio::select! {
+                    _ = node_task => {}
+                    _ = node_b_task => {}
+                }
+            });
     }
 }

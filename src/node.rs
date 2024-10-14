@@ -39,7 +39,8 @@ use tokio::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpListener, TcpStream,
     },
-    sync::mpsc::Receiver,
+    sync::mpsc,
+    sync::oneshot,
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tower::Layer;
@@ -116,8 +117,12 @@ impl Node {
     }
 
     /// Start node by listening, accepting and connecting to peers
-    pub async fn start(&mut self, command_rx: Receiver<Command>) {
-        log::debug!("Starting...");
+    pub async fn start(
+        &mut self,
+        command_rx: mpsc::Receiver<Command>,
+        accept_ready_tx: mpsc::Sender<()>,
+    ) {
+        log::debug!("Starting... {}", self.bind_address);
         if self.connect_to_seeds().await.is_err() {
             log::info!("Connecting to seeds failed.");
             return;
@@ -126,13 +131,15 @@ impl Node {
         if listener.is_err() {
             log::info!("Error starting listen");
         } else {
-            let accept_task = self.start_accept(listener.unwrap());
+            let accept_task = self.start_accept(listener.unwrap(), accept_ready_tx);
             let command_task = self.start_command_loop(command_rx);
             // Stop node when accept returns or Command asks us to stop.
             tokio::select! {
                 _ = accept_task => {
+                    log::debug!("Accept finished");
                 },
                 _ = command_task => {
+                    log::debug!("Command finished");
                 }
             };
         }
@@ -177,11 +184,12 @@ impl Node {
     }
 
     /// Start accepting connections
-    pub async fn start_accept(&self, listener: TcpListener) {
+    pub async fn start_accept(&self, listener: TcpListener, accept_ready_tx: mpsc::Sender<()>) {
         log::debug!("Start accepting...");
         let initiator = true;
         loop {
             log::debug!("Waiting on accept...");
+            let _ = accept_ready_tx.clone().send(()).await;
             let (stream, socket_addr) = listener.accept().await.unwrap();
             log::info!("Accept connection from {}", socket_addr);
             let (reader, writer) = self.build_reader_writer(stream);
@@ -273,8 +281,8 @@ impl Node {
     pub async fn start_reliable_sender_receiver(
         &self,
         connection_handle: ConnectionHandle,
-        connection_receiver: Receiver<ReliableNetworkMessage>,
-    ) -> (ReliableSenderHandle, Receiver<Message>) {
+        connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
+    ) -> (ReliableSenderHandle, mpsc::Receiver<Message>) {
         let (client_receiver, reliable_sender_handle) =
             ReliableSenderHandle::start(connection_handle, connection_receiver).await;
         (reliable_sender_handle, client_receiver)
@@ -284,7 +292,7 @@ impl Node {
         &self,
         addr: String,
         reliable_sender_handle: ReliableSenderHandle,
-        mut client_receiver: Receiver<Message>,
+        mut client_receiver: mpsc::Receiver<Message>,
         echo_broadcast_handle: EchoBroadcastHandle,
     ) {
         let membership_handle = self.state.membership_handle.clone();
