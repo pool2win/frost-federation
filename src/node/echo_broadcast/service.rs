@@ -70,12 +70,24 @@ where
             match msg.clone() {
                 Message::Unicast(_) => {}
                 Message::Echo(..) => {}
+                // mid is available in Broadcast - implies we received this message
                 Message::Broadcast(m, Some(mid)) => {
                     log::debug!("Generating echo...");
-                    let echo_msg = Message::Echo(m, mid);
-                    log::debug!("Echo message ... {:?}", echo_msg);
+                    let echo_msg = Message::Echo(m.clone(), mid.clone(), this.node_id.clone());
+                    log::debug!("Sending ECHO ... {:?}", echo_msg);
                     this.handle.send_echo(echo_msg, members.clone()).await?;
+
+                    log::debug!("ECHO Sent ...");
+                    this.handle
+                        .track_received_broadcast(
+                            Message::Broadcast(m, Some(mid)),
+                            this.node_id.clone(),
+                            members.clone(),
+                        )
+                        .await?;
+                    log::debug!("Deliver ECHO ...");
                 }
+                // mid is not available in Broadcast - implies we are sending this broadcast
                 Message::Broadcast(m, None) => {
                     log::debug!("Generating message_id for Send...");
                     let to_send =
@@ -123,12 +135,13 @@ mod echo_broadcast_service_tests {
         let mut mock_reliable_sender = ReliableSenderHandle::default();
         mock_reliable_sender.expect_clone().returning(|| {
             let mut mock = ReliableSenderHandle::default();
+            mock.expect_clone().returning(ReliableSenderHandle::default);
             mock.expect_send().return_once(|_| async { Ok(()) }.boxed());
             mock
         });
         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
         let _ = membership_handle
-            .add_member("a".to_string(), mock_reliable_sender)
+            .add_member("a".to_string(), mock_reliable_sender.clone())
             .await;
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
         let state = State::new(membership_handle, message_id_generator);
@@ -144,7 +157,8 @@ mod echo_broadcast_service_tests {
         }
         .into();
 
-        let handshake_service = Protocol::new("localhost".to_string(), state.clone());
+        let handshake_service =
+            Protocol::new("localhost".to_string(), state.clone(), mock_reliable_sender);
         let echo_broadcast_service = EchoBroadcast::new(
             handshake_service,
             echo_bcast_handle,

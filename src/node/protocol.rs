@@ -27,25 +27,27 @@ pub(crate) mod message_id_generator;
 mod ping;
 mod round_one_package;
 
+use self::message_id_generator::MessageId;
+#[mockall_double::double]
+use super::reliable_sender::ReliableSenderHandle;
 use crate::node::state::State;
-use futures::{Future, FutureExt};
 pub use handshake::{Handshake, HandshakeMessage};
 pub use heartbeat::{Heartbeat, HeartbeatMessage};
 pub use membership::{Membership, MembershipMessage};
 pub use ping::{Ping, PingMessage};
 pub use round_one_package::{RoundOnePackage, RoundOnePackageMessage};
+
+use futures::{Future, FutureExt};
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower::{util::BoxService, BoxError, Service, ServiceExt};
 
-use self::message_id_generator::MessageId;
-
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum Message {
     Unicast(Unicast),
     Broadcast(BroadcastProtocol, Option<MessageId>),
-    Echo(BroadcastProtocol, MessageId),
+    Echo(BroadcastProtocol, MessageId, String),
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -77,9 +79,10 @@ impl NetworkMessage for Message {
                 Unicast::Ping(m) => m.sender_id.clone(),
                 Unicast::Membership(m) => m.sender_id.clone(),
             },
-            Message::Broadcast(m, _) | Message::Echo(m, _) => match m {
+            Message::Broadcast(m, _) => match m {
                 BroadcastProtocol::RoundOnePackage(m) => m.sender_id.clone(),
             },
+            Message::Echo(_, _, peer_id) => peer_id.to_string(),
         }
     }
 
@@ -91,7 +94,7 @@ impl NetworkMessage for Message {
             Message::Broadcast(m, mid) => match m {
                 BroadcastProtocol::RoundOnePackage(_m) => mid.clone(),
             },
-            Message::Echo(m, mid) => match m {
+            Message::Echo(m, mid, _) => match m {
                 BroadcastProtocol::RoundOnePackage(_m) => Some(mid.clone()),
             },
         }
@@ -142,11 +145,16 @@ impl From<BroadcastProtocol> for Message {
 pub struct Protocol {
     node_id: String,
     state: State,
+    peer_sender: ReliableSenderHandle,
 }
 
 impl Protocol {
-    pub fn new(node_id: String, state: State) -> Self {
-        Protocol { node_id, state }
+    pub fn new(node_id: String, state: State, peer_sender: ReliableSenderHandle) -> Self {
+        Protocol {
+            node_id,
+            state,
+            peer_sender,
+        }
     }
 }
 
@@ -162,11 +170,12 @@ impl Service<Message> for Protocol {
     fn call(&mut self, msg: Message) -> Self::Future {
         let sender_id = self.node_id.clone();
         let state = self.state.clone();
+        let peer_sender = self.peer_sender.clone();
         async move {
             let svc = match &msg {
                 Message::Unicast(Unicast::Ping(_m)) => BoxService::new(Ping::new(sender_id)),
                 Message::Unicast(Unicast::Handshake(_m)) => {
-                    BoxService::new(Handshake::new(sender_id))
+                    BoxService::new(Handshake::new(sender_id, state, peer_sender))
                 }
                 Message::Unicast(Unicast::Heartbeat(_m)) => {
                     BoxService::new(Heartbeat::new(sender_id))
@@ -177,7 +186,7 @@ impl Service<Message> for Protocol {
                 Message::Broadcast(BroadcastProtocol::RoundOnePackage(_m), _) => {
                     BoxService::new(RoundOnePackage::new(sender_id, state))
                 }
-                Message::Echo(BroadcastProtocol::RoundOnePackage(_m), _) => {
+                Message::Echo(BroadcastProtocol::RoundOnePackage(_m), _, _) => {
                     BoxService::new(RoundOnePackage::new(sender_id, state))
                 }
             };
@@ -194,17 +203,23 @@ mod protocol_tests {
 
     use super::Protocol;
     use crate::node::protocol::ping::PingMessage;
+    #[mockall_double::double]
+    use crate::node::reliable_sender::ReliableSenderHandle;
     use crate::node::state::State;
     use crate::node::MembershipHandle;
     use crate::node::MessageIdGenerator;
 
     #[tokio::test]
     async fn it_should_create_protocol() {
+        let mut reliable_sender_handle = ReliableSenderHandle::default();
+        reliable_sender_handle
+            .expect_clone()
+            .returning(ReliableSenderHandle::default);
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
         let state = State::new(membership_handle, message_id_generator);
 
-        let p = Protocol::new("local".into(), state);
+        let p = Protocol::new("local".into(), state, reliable_sender_handle);
         let m = p.oneshot(PingMessage::default().into()).await;
         assert!(m.unwrap().is_some());
     }

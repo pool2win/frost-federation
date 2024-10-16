@@ -16,14 +16,15 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use crate::node::protocol::Message;
+use crate::node::protocol::{Message, Unicast};
+#[mockall_double::double]
+use crate::node::reliable_sender::ReliableSenderHandle;
+use crate::node::state::State;
 use futures::{Future, FutureExt};
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower::{BoxError, Service};
-
-use super::Unicast;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Default)]
 pub struct HandshakeMessage {
@@ -42,14 +43,20 @@ impl HandshakeMessage {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Handshake {
-    sender_id: String,
+    node_id: String,
+    state: State,
+    peer_sender: ReliableSenderHandle,
 }
 
 impl Handshake {
-    pub fn new(node_id: String) -> Self {
-        Handshake { sender_id: node_id }
+    pub fn new(node_id: String, state: State, peer_sender: ReliableSenderHandle) -> Self {
+        Handshake {
+            node_id,
+            state,
+            peer_sender,
+        }
     }
 }
 
@@ -67,7 +74,9 @@ impl Service<Message> for Handshake {
     }
 
     fn call(&mut self, msg: Message) -> Self::Future {
-        let local_sender_id = self.sender_id.clone();
+        let local_sender_id = self.node_id.clone();
+        let membership_handle = self.state.membership_handle.clone();
+        let peer_sender = self.peer_sender.clone();
         async move {
             match msg {
                 Message::Unicast(Unicast::Handshake(HandshakeMessage {
@@ -75,14 +84,32 @@ impl Service<Message> for Handshake {
                     sender_id,
                     version,
                 })) => match message.as_str() {
-                    "helo" => Ok(Some(Message::Unicast(super::Unicast::Handshake(
-                        HandshakeMessage {
-                            message: "oleh".to_string(),
-                            sender_id: local_sender_id,
-                            version: "0.1.0".to_string(),
-                        },
-                    )))),
-                    "oleh" => Ok(None),
+                    "helo" => {
+                        if membership_handle
+                            .add_member(sender_id, peer_sender)
+                            .await
+                            .is_err()
+                        {
+                            return Err("Error adding new member".into());
+                        }
+                        Ok(Some(Message::Unicast(super::Unicast::Handshake(
+                            HandshakeMessage {
+                                message: "oleh".to_string(),
+                                sender_id: local_sender_id,
+                                version: "0.1.0".to_string(),
+                            },
+                        ))))
+                    }
+                    "oleh" => {
+                        if membership_handle
+                            .add_member(sender_id, peer_sender)
+                            .await
+                            .is_err()
+                        {
+                            return Err("Error adding new member".into());
+                        }
+                        Ok(None)
+                    }
                     _ => Ok(Some(Message::Unicast(super::Unicast::Handshake(
                         HandshakeMessage {
                             message: "helo".to_string(),
@@ -100,14 +127,26 @@ impl Service<Message> for Handshake {
 
 #[cfg(test)]
 mod handshake_tests {
-    use crate::node::protocol::{Handshake, HandshakeMessage, Message};
+    use crate::node::membership::MembershipHandle;
+    use crate::node::protocol::{
+        message_id_generator::MessageIdGenerator, Handshake, HandshakeMessage, Message,
+    };
+    #[mockall_double::double]
+    use crate::node::reliable_sender::ReliableSenderHandle;
+    use crate::node::state::State;
     use tower::{Service, ServiceExt};
 
     #[tokio::test]
     async fn it_should_create_handshake_as_service_and_respond_to_default_message_with_handshake() {
-        let mut p = Handshake {
-            sender_id: "local".to_string(),
-        };
+        let membership_handle = MembershipHandle::start("local".into()).await;
+        let state = State::new(membership_handle, MessageIdGenerator::new("local".into()));
+        let mut reliable_sender_handle = ReliableSenderHandle::default();
+        reliable_sender_handle
+            .expect_clone()
+            .returning(ReliableSenderHandle::default);
+
+        let mut p = Handshake::new("local".to_string(), state, reliable_sender_handle);
+
         let res = p
             .ready()
             .await
@@ -130,9 +169,15 @@ mod handshake_tests {
 
     #[tokio::test]
     async fn it_should_create_handshake_as_service_and_respond_to_helo_with_oleh() {
-        let mut p = Handshake {
-            sender_id: "local".to_string(),
-        };
+        let membership_handle = MembershipHandle::start("local".into()).await;
+        let state = State::new(membership_handle, MessageIdGenerator::new("local".into()));
+        let mut reliable_sender_handle = ReliableSenderHandle::default();
+        reliable_sender_handle
+            .expect_clone()
+            .returning(ReliableSenderHandle::default);
+
+        let mut p = Handshake::new("local".to_string(), state, reliable_sender_handle);
+
         let res = p
             .ready()
             .await
@@ -161,9 +206,15 @@ mod handshake_tests {
 
     #[tokio::test]
     async fn it_should_create_handshake_as_service_and_respond_to_oleh_with_none() {
-        let mut p = Handshake {
-            sender_id: "local".to_string(),
-        };
+        let membership_handle = MembershipHandle::start("local".into()).await;
+        let state = State::new(membership_handle, MessageIdGenerator::new("local".into()));
+        let mut reliable_sender_handle = ReliableSenderHandle::default();
+        reliable_sender_handle
+            .expect_clone()
+            .returning(ReliableSenderHandle::default);
+
+        let mut p = Handshake::new("local".to_string(), state, reliable_sender_handle);
+
         let res = p
             .ready()
             .await

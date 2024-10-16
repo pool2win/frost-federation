@@ -39,6 +39,12 @@ pub(crate) enum EchoBroadcastMessage {
         members: ReliableSenderMap,
         respond_to: ConnectionResultSender,
     },
+    Receive {
+        data: Message,
+        members: ReliableSenderMap,
+        node_id: String,
+        respond_to: ConnectionResultSender,
+    },
     EchoSend {
         data: Message,
         members: ReliableSenderMap,
@@ -46,7 +52,6 @@ pub(crate) enum EchoBroadcastMessage {
     },
     EchoReceive {
         data: Message,
-        peer_addr: String,
     },
 }
 
@@ -82,29 +87,81 @@ impl EchoBroadcastActor {
             } => {
                 let _ = self.send_message(data, members, respond_to).await;
             }
+            EchoBroadcastMessage::Receive {
+                data,
+                members,
+                node_id,
+                respond_to,
+            } => {
+                let _ = self
+                    .receive_message(data, members, node_id, respond_to)
+                    .await;
+            }
             EchoBroadcastMessage::EchoSend {
                 data,
                 members,
                 respond_to,
             } => {
                 // send echo to all members
-                let _ = self.send_message(data.clone(), members, respond_to).await;
+                let _ = self
+                    .send_echos_to_members(data.clone(), members, respond_to)
+                    .await;
             }
-            EchoBroadcastMessage::EchoReceive { data, peer_addr } => {
+            EchoBroadcastMessage::EchoReceive { data } => {
                 // manage echo data structures and confirm delivered
                 log::debug!("Handle received echo in actor");
-                self.handle_received_echo(data, peer_addr).await;
+                self.handle_received_echo(data).await;
             }
         }
     }
 
-    /// Receives messages to echo broadcast, wait for echo messages
-    /// from all members. Timeout is handled by layer on top.
+    /// Send echo broadcast. Then wait for echo messages from all
+    /// members. Timeout is handled by layer on top.
     ///
     /// Process:
     /// 1. Wait for echos from all members for the message sent
     /// 2. On receiving echos from all members, return Ok() to waiting receiver
     pub async fn send_message(
+        &mut self,
+        data: Message,
+        members: ReliableSenderMap,
+        respond_to: ConnectionResultSender,
+    ) -> Result<(), Box<dyn Error + Sync + Send>>
+    where
+        Message: NetworkMessage + Serialize,
+    {
+        let sender_id = data.get_sender_id();
+        let message_id = data.get_message_id().unwrap();
+
+        // If members is an empty list, return success immediately
+        if members.is_empty() {
+            let _ = respond_to.send(Ok(()));
+            return Ok(());
+        }
+        for (member, reliable_sender) in &members {
+            if reliable_sender.send(data.clone()).await.is_err() {
+                log::debug!("Error in reliable sender send...");
+                let _ = respond_to.send(Err("Error sending using reliable sender".into()));
+                return Err("Error sending message using reliable sender".into());
+            }
+            let message_echos = self.message_echos.entry(message_id.clone()).or_default();
+            message_echos.entry(member.clone()).or_insert(false);
+        }
+        self.reliable_senders.insert(message_id.clone(), members);
+
+        // Update sender_id's echo to true
+        self.add_echo(&message_id, sender_id);
+
+        self.message_client_txs.insert(message_id, respond_to);
+        Ok(())
+    }
+
+    /// Send echos to received broadcast message. We use reliable sender to send echos and don't w
+    ///
+    /// Process:
+    /// 1. Wait for echos from all members for the message sent
+    /// 2. On receiving echos from all members, return Ok() to waiting receiver
+    pub async fn send_echos_to_members(
         &mut self,
         data: Message,
         members: ReliableSenderMap,
@@ -127,17 +184,50 @@ impl EchoBroadcastActor {
         self.reliable_senders.insert(message_id.clone(), members);
 
         // Update sender_id's echo to true
-        self.message_echos
-            .get_mut(&message_id)
-            .unwrap()
-            .insert(sender_id, true);
+        self.add_echo(&message_id, sender_id);
 
         self.message_client_txs.insert(message_id, respond_to);
         Ok(())
     }
 
+    /// Receive an echo from a broadcast message. We start tracking
+    /// receiving echos for this, and delivery it once all echos are received.
+    ///
+    /// Process:
+    /// 1. Wait for echos from all members for the message sent
+    /// 2. On receiving echos from all members, return Ok() to waiting receiver
+    pub async fn receive_message(
+        &mut self,
+        data: Message,
+        members: ReliableSenderMap,
+        node_id: String,
+        respond_to: ConnectionResultSender,
+    ) -> Result<(), Box<dyn Error + Sync + Send>>
+    where
+        Message: NetworkMessage + Serialize,
+    {
+        let sender_id = data.get_sender_id();
+        let message_id = data.get_message_id().unwrap();
+        log::debug!("In actor receive message.... {}, {}", sender_id, node_id);
+
+        for member in members.keys() {
+            let message_echos = self.message_echos.entry(message_id.clone()).or_default();
+            message_echos.entry(member.clone()).or_insert(false);
+            log::debug!("Setting to false for member {}", member);
+        }
+        self.reliable_senders.insert(message_id.clone(), members);
+
+        self.add_echo(&message_id, sender_id.clone());
+        self.add_echo(&message_id, node_id);
+
+        self.message_client_txs.insert(message_id, respond_to);
+        self.handle_received_echo(data).await;
+        Ok(())
+    }
+
     /// Check if echos have been received from all members for a given message identifier
     pub fn echo_received_for_all(&self, message_id: &MessageId) -> bool {
+        log::debug!("{:?}", self.message_echos);
         self.message_echos
             .get(message_id)
             .unwrap()
@@ -147,6 +237,7 @@ impl EchoBroadcastActor {
 
     /// Add received echo from a sender to the list of echos received
     pub fn add_echo(&mut self, message_id: &MessageId, sender_id: String) {
+        log::debug!("Adding echo for {:?}, {:?}", message_id, sender_id);
         match self.message_echos.get_mut(message_id) {
             Some(echos) => {
                 echos
@@ -164,14 +255,15 @@ impl EchoBroadcastActor {
     }
 
     /// Handle Echo messages received for this message
-    pub async fn handle_received_echo(&mut self, data: Message, peer_addr: String)
+    pub async fn handle_received_echo(&mut self, data: Message)
     where
         Message: NetworkMessage + Serialize,
     {
+        let peer_id = data.get_sender_id();
         let message_id = data.get_message_id().unwrap();
 
-        log::debug!("Adding echo {:?} {:?}", message_id, peer_addr);
-        self.add_echo(&message_id, peer_addr);
+        log::debug!("Adding echo {:?} {:?}", message_id, peer_id);
+        self.add_echo(&message_id, peer_id);
 
         if self.echo_received_for_all(&message_id) {
             match self.message_client_txs.remove(&message_id) {
@@ -179,6 +271,7 @@ impl EchoBroadcastActor {
                     if respond_to.send(Ok(())).is_err() {
                         log::error!("Error responding on echo broadcast completion");
                     }
+                    log::debug!("Broadcast message can be delivered now...");
                 }
                 None => {
                     log::error!("No receivers for the confirmed echo broadcast");
@@ -214,22 +307,51 @@ impl EchoBroadcastHandle {
         Self { sender: tx }
     }
 
-    /// Keep the same signature to send, so we can convert that into a Trait later if we want.
+    /// Send message to all members, wait for echos before to be received by Actor before returning.
     pub async fn send(&self, message: Message, members: ReliableSenderMap) -> ConnectionResult<()> {
         let (sender_from_actor, receiver_from_actor) = oneshot::channel();
         let msg = EchoBroadcastMessage::Send {
             data: message,
-            members,
+            members: members.clone(),
             respond_to: sender_from_actor,
         };
         if self.sender.send(msg).await.is_err() {
             log::debug!("Returning send error...");
             return Err("Connection error".into());
         }
+        log::debug!("Waiting for echos from members {:?}", members.into_keys());
         let result = receiver_from_actor.await;
         if result?.is_err() {
             Err("Broadcast error".into())
         } else {
+            log::debug!("Broadcast sent");
+            Ok(())
+        }
+    }
+
+    /// Track a received echo broadcast message
+    pub async fn track_received_broadcast(
+        &self,
+        message: Message,
+        node_id: String,
+        members: ReliableSenderMap,
+    ) -> ConnectionResult<()> {
+        let (sender_from_actor, receiver_from_actor) = oneshot::channel();
+        let msg = EchoBroadcastMessage::Receive {
+            data: message,
+            members,
+            node_id,
+            respond_to: sender_from_actor,
+        };
+        if self.sender.send(msg).await.is_err() {
+            log::debug!("Error tracking received broadcast...");
+            return Err("Connection error".into());
+        }
+        let result = receiver_from_actor.await;
+        if result?.is_err() {
+            Err("Broadcast error".into())
+        } else {
+            log::debug!("TRACKING RECEIVED BROADCAST DONE......");
             Ok(())
         }
     }
@@ -254,21 +376,13 @@ impl EchoBroadcastHandle {
             log::debug!("Returning send error...");
             return Err("Connection error".into());
         }
-        let result = receiver_from_actor.await;
-        if result?.is_err() {
-            Err("Echo error".into())
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 
     /// Receive an echo broadcast message from connection
     /// Pass this to the actor, which will respond to the echo
-    pub async fn receive_echo(&self, message: Message, peer_addr: String) -> ConnectionResult<()> {
-        let msg = EchoBroadcastMessage::EchoReceive {
-            data: message,
-            peer_addr,
-        };
+    pub async fn receive_echo(&self, message: Message) -> ConnectionResult<()> {
+        let msg = EchoBroadcastMessage::EchoReceive { data: message };
         if self.sender.send(msg).await.is_err() {
             return Err("Failed to send receive to echo broadcast actor".into());
         }
@@ -280,8 +394,9 @@ mockall::mock! {
     pub EchoBroadcastHandle{
         pub async fn start() -> Self;
         pub async fn send(&self, message: Message, members: ReliableSenderMap) -> ConnectionResult<()>;
+        pub async fn track_received_broadcast(&self, message: Message, node_id: String, members: ReliableSenderMap) -> ConnectionResult<()>;
         pub async fn send_echo(&self, message: Message, members: ReliableSenderMap) -> ConnectionResult<()>;
-        pub async fn receive_echo(&self, message: Message, peer_addr: String) -> ConnectionResult<()>;
+        pub async fn receive_echo(&self, message: Message) -> ConnectionResult<()>;
     }
 
     impl Clone for EchoBroadcastHandle {
@@ -305,7 +420,7 @@ mod echo_broadcast_actor_tests {
     #[tokio::test]
     async fn it_should_handle_send_message_with_ok_from_reliable_sender() {
         let (_sender, receiver) = mpsc::channel(32);
-        let (respond_to, waiting_for_response) = oneshot::channel();
+        let (respond_to, _waiting_for_response) = oneshot::channel();
 
         let mut reliable_sender = ReliableSenderHandle::default();
         reliable_sender
@@ -333,7 +448,7 @@ mod echo_broadcast_actor_tests {
     #[tokio::test]
     async fn it_should_handle_send_message_with_error_from_reliable_sender() {
         let (_sender, receiver) = mpsc::channel(32);
-        let (respond_to, waiting_for_response) = oneshot::channel();
+        let (respond_to, _waiting_for_response) = oneshot::channel();
 
         let mut reliable_sender = ReliableSenderHandle::default();
         reliable_sender
@@ -371,12 +486,17 @@ mod echo_broadcast_actor_tests {
             Some(MessageId(1)),
         );
 
-        first_reliable_sender_handle
-            .expect_send()
-            .return_once(|_| async { Ok(()) }.boxed());
-        second_reliable_sender_handle
-            .expect_send()
-            .return_once(|_| async { Err("Error sending message".into()) }.boxed());
+        first_reliable_sender_handle.expect_clone().returning(|| {
+            let mut mock = ReliableSenderHandle::default();
+            mock.expect_send().return_once(|_| async { Ok(()) }.boxed());
+            mock
+        });
+        second_reliable_sender_handle.expect_clone().returning(|| {
+            let mut mock = ReliableSenderHandle::default();
+            mock.expect_send()
+                .return_once(|_| async { Err("Error sending message".into()) }.boxed());
+            mock
+        });
 
         let reliable_senders_map = HashMap::from([
             ("a".to_string(), first_reliable_sender_handle),
@@ -415,12 +535,10 @@ mod echo_broadcast_actor_tests {
                 message: "ping".to_string(),
             }),
             MessageId(1),
+            "a".into(),
         );
 
-        let msg = EchoBroadcastMessage::EchoReceive {
-            data: msg,
-            peer_addr: "a".into(),
-        };
+        let msg = EchoBroadcastMessage::EchoReceive { data: msg };
 
         let _result = echo_bcast_actor.handle_message(msg).await;
         assert_eq!(echo_bcast_actor.message_echos.len(), 1);
@@ -479,11 +597,13 @@ mod echo_broadcast_actor_tests {
             sender_id: "localhost".to_string(),
             message: "round one package".to_string(),
         };
-        let echo_message = Message::Echo(BroadcastProtocol::RoundOnePackage(msg), MessageId(1));
+        let echo_message = Message::Echo(
+            BroadcastProtocol::RoundOnePackage(msg),
+            MessageId(1),
+            "a".into(),
+        );
 
-        echo_bcast_actor
-            .handle_received_echo(echo_message, "a".into())
-            .await;
+        echo_bcast_actor.handle_received_echo(echo_message).await;
 
         assert_eq!(echo_bcast_actor.message_echos.len(), 1);
         assert_eq!(
@@ -534,26 +654,24 @@ mod echo_broadcast_actor_tests {
 
         let echo_b: Message = Message::Echo(
             BroadcastProtocol::RoundOnePackage(RoundOnePackageMessage {
-                sender_id: "b".to_string(),
+                sender_id: "localhost".to_string(),
                 message: "round one package".to_string(),
             }),
             MessageId(1),
+            "b".into(),
         );
         let echo_c: Message = Message::Echo(
             BroadcastProtocol::RoundOnePackage(RoundOnePackageMessage {
-                sender_id: "c".to_string(),
+                sender_id: "localhost".to_string(),
                 message: "round one package".to_string(),
             }),
             MessageId(1),
+            "c".into(),
         );
 
-        echo_bcast_actor
-            .handle_received_echo(echo_b, "b".into())
-            .await;
+        echo_bcast_actor.handle_received_echo(echo_b).await;
 
-        echo_bcast_actor
-            .handle_received_echo(echo_c, "c".into())
-            .await;
+        echo_bcast_actor.handle_received_echo(echo_c).await;
 
         assert!(msg_receiver.await.is_ok());
     }
