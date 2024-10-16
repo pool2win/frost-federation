@@ -18,10 +18,12 @@
 
 #[mockall_double::double]
 use self::echo_broadcast::EchoBroadcastHandle;
+use self::protocol::message_id_generator::MessageId;
 use self::{membership::MembershipHandle, protocol::Message};
 use crate::node::echo_broadcast::service::EchoBroadcast;
 use crate::node::noise_handler::{NoiseHandler, NoiseIO};
 use crate::node::protocol::init::initialize;
+use crate::node::protocol::Protocol;
 use crate::node::reliable_sender::service::ReliableSend;
 use crate::node::reliable_sender::ReliableNetworkMessage;
 #[mockall_double::double]
@@ -204,16 +206,6 @@ impl Node {
                     self.echo_broadcast_handle.clone(),
                 )
                 .await;
-            if self
-                .state
-                .membership_handle
-                .add_member(socket_addr.to_string(), reliable_sender_handle.clone())
-                .await
-                .is_err()
-            {
-                log::debug!("Error adding new connection to membership. Stopping.");
-                return;
-            }
 
             let node_id = self.get_node_id();
             let state = self.state.clone();
@@ -258,15 +250,6 @@ impl Node {
                         self.echo_broadcast_handle.clone(),
                     )
                     .await;
-                if self
-                    .state
-                    .membership_handle
-                    .add_member(peer_addr.to_string(), reliable_sender_handle)
-                    .await
-                    .is_err()
-                {
-                    return Err("Error adding new connection to membership. Stopping.".into());
-                }
             } else {
                 log::debug!("Failed to connect to seed {}", seed);
                 return Err("Failed to connect to seed".into());
@@ -287,7 +270,7 @@ impl Node {
 
     pub async fn start_connection_event_loop(
         &self,
-        addr: String,
+        peer_addr: String,
         reliable_sender_handle: ReliableSenderHandle,
         mut client_receiver: mpsc::Receiver<Message>,
         echo_broadcast_handle: EchoBroadcastHandle,
@@ -321,20 +304,22 @@ impl Node {
                                 Message::Broadcast(broadcast_message, mid),
                                 echo_broadcast_handle.clone(),
                                 state.clone(),
+                                reliable_sender_handle.clone(),
                             )
                             .await;
                         }
-                        Message::Echo(broadcast_message, mid) => {
+                        Message::Echo(broadcast_message, mid, peer_id) => {
                             log::info!("Received echo from network ...");
-                            let echo_message = Message::Echo(broadcast_message, mid.clone());
-                            let _ = echo_broadcast_handle
-                                .receive_echo(echo_message, addr.clone())
-                                .await;
+                            Node::respond_to_echo_message(
+                                Message::Echo(broadcast_message, mid, peer_id),
+                                echo_broadcast_handle.clone(),
+                            )
+                            .await;
                         }
                     },
                     _ => {
                         log::info!("Connection clean up");
-                        if membership_handle.remove_member(addr).await.is_ok() {
+                        if membership_handle.remove_member(peer_addr).await.is_ok() {
                             log::info!("Member removed");
                         }
                         return;
@@ -351,14 +336,18 @@ impl Node {
         reliable_sender_handle: ReliableSenderHandle,
         state: State,
     ) {
-        let protocol_service = protocol::Protocol::new(node_id.clone(), state);
-        let reliable_sender_service = ReliableSend::new(protocol_service, reliable_sender_handle);
-        let timeout_layer =
-            tower::timeout::TimeoutLayer::new(tokio::time::Duration::from_millis(timeout));
-        let _ = timeout_layer
-            .layer(reliable_sender_service)
-            .oneshot(message)
-            .await;
+        tokio::spawn(async move {
+            let protocol_service =
+                Protocol::new(node_id.clone(), state, reliable_sender_handle.clone());
+            let reliable_sender_service =
+                ReliableSend::new(protocol_service, reliable_sender_handle);
+            let timeout_layer =
+                tower::timeout::TimeoutLayer::new(tokio::time::Duration::from_millis(timeout));
+            let _ = timeout_layer
+                .layer(reliable_sender_service)
+                .oneshot(message)
+                .await;
+        });
     }
 
     async fn respond_to_broadcast_message(
@@ -367,21 +356,34 @@ impl Node {
         message: Message,
         echo_broadcast_handle: EchoBroadcastHandle,
         state: State,
+        reliable_sender_handle: ReliableSenderHandle,
     ) {
-        log::debug!("In respond to broadcast message {:?}", message);
-        // TODO - This could cause the echo to go to new
-        // members who didn't receive the initial
-        // broadcast. Make sure they ignore such a message
-        // as a benign error.
-        let protocol_service = protocol::Protocol::new(node_id.clone(), state.clone());
-        let echo_broadcast_service =
-            EchoBroadcast::new(protocol_service, echo_broadcast_handle, state, node_id);
-        let timeout_layer =
-            tower::timeout::TimeoutLayer::new(tokio::time::Duration::from_millis(timeout));
-        let _ = timeout_layer
-            .layer(echo_broadcast_service)
-            .oneshot(message)
-            .await;
+        tokio::spawn(async move {
+            log::debug!("In respond to broadcast message {:?}", message);
+            // TODO - This could cause the echo to go to new
+            // members who didn't receive the initial
+            // broadcast. Make sure they ignore such a message
+            // as a benign error.
+            let protocol_service = Protocol::new(
+                node_id.clone(),
+                state.clone(),
+                reliable_sender_handle.clone(),
+            );
+            let echo_broadcast_service =
+                EchoBroadcast::new(protocol_service, echo_broadcast_handle, state, node_id);
+            let timeout_layer =
+                tower::timeout::TimeoutLayer::new(tokio::time::Duration::from_millis(timeout));
+            let _ = timeout_layer
+                .layer(echo_broadcast_service)
+                .oneshot(message)
+                .await;
+        });
+    }
+
+    async fn respond_to_echo_message(message: Message, echo_broadcast_handle: EchoBroadcastHandle) {
+        tokio::spawn(async move {
+            let _ = echo_broadcast_handle.receive_echo(message).await;
+        });
     }
 }
 
@@ -495,16 +497,22 @@ mod node_tests {
             mocked.expect_send().return_once(|_, _| Ok(()));
             mocked.expect_send_echo().return_once(|_, _| Ok(()));
             mocked
+                .expect_track_received_broadcast()
+                .return_once(|_, _, _| Ok(()));
+            mocked
         });
 
         let membership_handle = MembershipHandle::start("local".into()).await;
         let state = super::State::new(membership_handle, MessageIdGenerator::new("local".into()));
+        let reliable_sender_handle = ReliableSenderHandle::default();
+
         let res = Node::respond_to_broadcast_message(
             "local".into(),
             100,
             Message::Broadcast(broadcast_message, Some(MessageId(1))),
             echo_broadcast_handle,
             state,
+            reliable_sender_handle,
         )
         .await;
     }

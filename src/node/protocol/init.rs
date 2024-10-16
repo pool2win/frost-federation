@@ -19,13 +19,16 @@
 use crate::node::echo_broadcast::service::EchoBroadcast;
 #[mockall_double::double]
 use crate::node::echo_broadcast::EchoBroadcastHandle;
-use crate::node::protocol::{MembershipMessage, Protocol, RoundOnePackageMessage};
+use crate::node::protocol::{
+    HandshakeMessage, MembershipMessage, Protocol, RoundOnePackageMessage,
+};
 use crate::node::reliable_sender::service::ReliableSend;
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
-use crate::node::State;
+use crate::node::{reliable_sender, State};
 
-use tower::{Layer, ServiceExt};
+use tokio::time::Duration;
+use tower::{timeout::TimeoutLayer, Layer, ServiceExt};
 
 /// Run initial protocols for Node
 pub(crate) async fn initialize(
@@ -33,22 +36,28 @@ pub(crate) async fn initialize(
     state: State,
     echo_broadcast_handle: EchoBroadcastHandle,
     reliable_sender_handle: ReliableSenderHandle,
-    delivery_time: u64,
+    delivery_timeout: u64,
 ) {
-    // let handshake_service = protocol::Protocol::new(node_id.clone(), self.state.clone());
-    // let reliable_sender_service =
-    //     ReliableSend::new(handshake_service, reliable_sender_handle.clone());
-    // let timeout_layer = tower::timeout::TimeoutLayer::new(
-    //     tokio::time::Duration::from_millis(self.delivery_timeout),
-    // );
-    // let _ = timeout_layer
-    //     .layer(reliable_sender_service)
-    //     .oneshot(HandshakeMessage::default().into())
-    //     .await;
+    let handshake_service = Protocol::new(
+        node_id.clone(),
+        state.clone(),
+        reliable_sender_handle.clone(),
+    );
+    let reliable_sender_service =
+        ReliableSend::new(handshake_service, reliable_sender_handle.clone());
+    let timeout_layer = TimeoutLayer::new(Duration::from_millis(delivery_timeout));
+    let _ = timeout_layer
+        .layer(reliable_sender_service)
+        .oneshot(HandshakeMessage::default().into())
+        .await;
 
-    // log::info!("Handshake finished");
+    log::info!("Handshake finished");
 
-    let round_one_service = Protocol::new(node_id.clone(), state.clone());
+    let round_one_service = Protocol::new(
+        node_id.clone(),
+        state.clone(),
+        reliable_sender_handle.clone(),
+    );
     let echo_broadcast_service = EchoBroadcast::new(
         round_one_service,
         echo_broadcast_handle,
@@ -70,7 +79,7 @@ pub(crate) async fn initialize(
         node_id.clone(),
         reliable_sender_handle,
         state.clone(),
-        delivery_time,
+        delivery_timeout,
     )
     .await;
 
@@ -84,7 +93,7 @@ pub(crate) async fn send_membership(
     delivery_time: u64,
 ) {
     log::info!("Sending membership information");
-    let protocol_service = Protocol::new(node_id.clone(), state);
+    let protocol_service = Protocol::new(node_id.clone(), state, sender.clone());
     let reliable_sender_service = ReliableSend::new(protocol_service, sender);
     let timeout_layer =
         tower::timeout::TimeoutLayer::new(tokio::time::Duration::from_millis(delivery_time));
