@@ -53,28 +53,36 @@ pub(crate) async fn initialize(
 
     log::info!("Handshake finished");
 
-    // let round_one_service = Protocol::new(
-    //     node_id.clone(),
-    //     state.clone(),
-    //     reliable_sender_handle.clone(),
-    // );
-    // let echo_broadcast_service = EchoBroadcast::new(
-    //     round_one_service,
-    //     echo_broadcast_handle,
-    //     state.clone(),
-    //     node_id.clone(),
-    // );
+    // TODO: We need to trigger the KeyGen protocol from an event in
+    // the change in state, or from the commands interface. For now,
+    // to test the echo broadcast, we sleep here for a 100ms and
+    // trigger the broadcast.
+    // The test shows echo broadcast is delivered successfully.
 
-    // log::info!("Sending echo broadcast");
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-    // let _ = echo_broadcast_service
-    //     .oneshot(
-    //         RoundOnePackageMessage::new(node_id.clone(), "hello from round one package".into())
-    //             .into(),
-    //     )
-    //     .await;
+    let round_one_service = Protocol::new(
+        node_id.clone(),
+        state.clone(),
+        reliable_sender_handle.clone(),
+    );
+    let echo_broadcast_service = EchoBroadcast::new(
+        round_one_service,
+        echo_broadcast_handle,
+        state.clone(),
+        node_id.clone(),
+    );
 
-    // log::info!("Echo broadcast finished");
+    log::info!("Sending echo broadcast");
+
+    let _ = echo_broadcast_service
+        .oneshot(
+            RoundOnePackageMessage::new(node_id.clone(), "hello from round one package".into())
+                .into(),
+        )
+        .await;
+
+    log::info!("Echo broadcast finished");
 }
 
 pub(crate) async fn send_membership(
