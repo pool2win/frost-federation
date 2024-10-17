@@ -137,7 +137,8 @@ impl Service<Message> for Handshake {
 mod handshake_tests {
     use crate::node::membership::MembershipHandle;
     use crate::node::protocol::{
-        message_id_generator::MessageIdGenerator, Handshake, HandshakeMessage, Message,
+        message_id_generator::MessageIdGenerator, Handshake, HandshakeMessage, MembershipMessage,
+        Message, Unicast,
     };
     #[mockall_double::double]
     use crate::node::reliable_sender::ReliableSenderHandle;
@@ -217,9 +218,11 @@ mod handshake_tests {
         let membership_handle = MembershipHandle::start("local".into()).await;
         let state = State::new(membership_handle, MessageIdGenerator::new("local".into()));
         let mut reliable_sender_handle = ReliableSenderHandle::default();
-        reliable_sender_handle
-            .expect_clone()
-            .returning(ReliableSenderHandle::default);
+        reliable_sender_handle.expect_clone().returning(|| {
+            let mut mock = ReliableSenderHandle::default();
+            mock.expect_clone().returning(ReliableSenderHandle::default);
+            mock
+        });
 
         let mut p = Handshake::new("local".to_string(), state, reliable_sender_handle);
 
@@ -236,6 +239,12 @@ mod handshake_tests {
             )))
             .await
             .unwrap();
-        assert!(res.is_none());
+        assert!(res.is_some());
+        assert_eq!(
+            res,
+            Some(Message::Unicast(Unicast::Membership(
+                MembershipMessage::new("local".into(), Some(vec!["local".to_string()])),
+            )))
+        );
     }
 }
