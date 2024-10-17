@@ -16,7 +16,7 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use crate::node::protocol::{Message, Unicast};
+use crate::node::protocol::{MembershipMessage, Message, Unicast};
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
 use crate::node::state::State;
@@ -92,7 +92,7 @@ impl Service<Message> for Handshake {
                         {
                             return Err("Error adding new member".into());
                         }
-                        Ok(Some(Message::Unicast(super::Unicast::Handshake(
+                        Ok(Some(Message::Unicast(Unicast::Handshake(
                             HandshakeMessage {
                                 message: "oleh".to_string(),
                                 sender_id: local_sender_id,
@@ -108,9 +108,17 @@ impl Service<Message> for Handshake {
                         {
                             return Err("Error adding new member".into());
                         }
-                        Ok(None)
+                        let new_membership = membership_handle
+                            .get_members()
+                            .await
+                            .unwrap()
+                            .into_keys()
+                            .collect();
+                        Ok(Some(Message::Unicast(Unicast::Membership(
+                            MembershipMessage::new(local_sender_id, Some(new_membership)),
+                        ))))
                     }
-                    _ => Ok(Some(Message::Unicast(super::Unicast::Handshake(
+                    _ => Ok(Some(Message::Unicast(Unicast::Handshake(
                         HandshakeMessage {
                             message: "helo".to_string(),
                             sender_id: local_sender_id,

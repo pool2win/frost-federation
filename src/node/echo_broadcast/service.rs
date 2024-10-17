@@ -85,7 +85,7 @@ where
                             members.clone(),
                         )
                         .await?;
-                    log::debug!("Deliver ECHO ...");
+                    log::info!("Deliver ECHO ...");
                 }
                 // mid is not available in Broadcast - implies we are sending this broadcast
                 Message::Broadcast(m, None) => {
