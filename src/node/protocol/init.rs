@@ -53,37 +53,28 @@ pub(crate) async fn initialize(
 
     log::info!("Handshake finished");
 
-    let round_one_service = Protocol::new(
-        node_id.clone(),
-        state.clone(),
-        reliable_sender_handle.clone(),
-    );
-    let echo_broadcast_service = EchoBroadcast::new(
-        round_one_service,
-        echo_broadcast_handle,
-        state.clone(),
-        node_id.clone(),
-    );
+    // let round_one_service = Protocol::new(
+    //     node_id.clone(),
+    //     state.clone(),
+    //     reliable_sender_handle.clone(),
+    // );
+    // let echo_broadcast_service = EchoBroadcast::new(
+    //     round_one_service,
+    //     echo_broadcast_handle,
+    //     state.clone(),
+    //     node_id.clone(),
+    // );
 
-    log::info!("Sending echo broadcast");
+    // log::info!("Sending echo broadcast");
 
-    let _ = echo_broadcast_service
-        .oneshot(
-            RoundOnePackageMessage::new(node_id.clone(), "hello from round one package".into())
-                .into(),
-        )
-        .await;
+    // let _ = echo_broadcast_service
+    //     .oneshot(
+    //         RoundOnePackageMessage::new(node_id.clone(), "hello from round one package".into())
+    //             .into(),
+    //     )
+    //     .await;
 
-    log::info!("Echo broadcast finished");
-    let _ = send_membership(
-        node_id.clone(),
-        reliable_sender_handle,
-        state.clone(),
-        delivery_timeout,
-    )
-    .await;
-
-    log::info!("Membership sent");
+    // log::info!("Echo broadcast finished");
 }
 
 pub(crate) async fn send_membership(
