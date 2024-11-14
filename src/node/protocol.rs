@@ -19,13 +19,13 @@
 extern crate flexbuffers;
 extern crate serde;
 
+pub(crate) mod dkg;
 mod handshake;
 mod heartbeat;
 pub mod init;
 mod membership;
 pub(crate) mod message_id_generator;
 mod ping;
-mod round_one_package;
 
 use self::message_id_generator::MessageId;
 #[mockall_double::double]
@@ -35,7 +35,6 @@ pub use handshake::{Handshake, HandshakeMessage};
 pub use heartbeat::{Heartbeat, HeartbeatMessage};
 pub use membership::{Membership, MembershipMessage};
 pub use ping::{Ping, PingMessage};
-pub use round_one_package::{RoundOnePackage, RoundOnePackageMessage};
 
 use futures::{Future, FutureExt};
 use serde::{Deserialize, Serialize};
@@ -60,7 +59,7 @@ pub enum Unicast {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum BroadcastProtocol {
-    RoundOnePackage(RoundOnePackageMessage),
+    DKGRoundOnePackage(dkg::round_one::PackageMessage),
 }
 
 pub trait NetworkMessage {
@@ -80,7 +79,7 @@ impl NetworkMessage for Message {
                 Unicast::Membership(m) => m.sender_id.clone(),
             },
             Message::Broadcast(m, _) => match m {
-                BroadcastProtocol::RoundOnePackage(m) => m.sender_id.clone(),
+                BroadcastProtocol::DKGRoundOnePackage(m) => m.sender_id.clone(),
             },
             Message::Echo(_, _, peer_id) => peer_id.to_string(),
         }
@@ -92,10 +91,10 @@ impl NetworkMessage for Message {
         match self {
             Message::Unicast(_m) => None,
             Message::Broadcast(m, mid) => match m {
-                BroadcastProtocol::RoundOnePackage(_m) => mid.clone(),
+                BroadcastProtocol::DKGRoundOnePackage(_m) => mid.clone(),
             },
             Message::Echo(m, mid, _) => match m {
-                BroadcastProtocol::RoundOnePackage(_m) => Some(mid.clone()),
+                BroadcastProtocol::DKGRoundOnePackage(_m) => Some(mid.clone()),
             },
         }
     }
@@ -125,17 +124,17 @@ impl From<MembershipMessage> for Message {
     }
 }
 
-impl From<RoundOnePackageMessage> for Message {
-    fn from(value: RoundOnePackageMessage) -> Self {
-        Message::Broadcast(BroadcastProtocol::RoundOnePackage(value), None)
+impl From<dkg::round_one::PackageMessage> for Message {
+    fn from(value: dkg::round_one::PackageMessage) -> Self {
+        Message::Broadcast(BroadcastProtocol::DKGRoundOnePackage(value), None)
     }
 }
 
 impl From<BroadcastProtocol> for Message {
     fn from(value: BroadcastProtocol) -> Self {
         match value {
-            BroadcastProtocol::RoundOnePackage(m) => {
-                Message::Broadcast(BroadcastProtocol::RoundOnePackage(m), None)
+            BroadcastProtocol::DKGRoundOnePackage(m) => {
+                Message::Broadcast(BroadcastProtocol::DKGRoundOnePackage(m), None)
             }
         }
     }
@@ -183,11 +182,11 @@ impl Service<Message> for Protocol {
                 Message::Unicast(Unicast::Membership(_m)) => {
                     BoxService::new(Membership::new(sender_id, state))
                 }
-                Message::Broadcast(BroadcastProtocol::RoundOnePackage(_m), _) => {
-                    BoxService::new(RoundOnePackage::new(sender_id, state))
+                Message::Broadcast(BroadcastProtocol::DKGRoundOnePackage(_m), _) => {
+                    BoxService::new(dkg::round_one::Package::new(sender_id, state))
                 }
-                Message::Echo(BroadcastProtocol::RoundOnePackage(_m), _, _) => {
-                    BoxService::new(RoundOnePackage::new(sender_id, state))
+                Message::Echo(BroadcastProtocol::DKGRoundOnePackage(_m), _, _) => {
+                    BoxService::new(dkg::round_one::Package::new(sender_id, state))
                 }
             };
             svc.oneshot(msg).await

@@ -18,7 +18,6 @@
 
 #[mockall_double::double]
 use self::echo_broadcast::EchoBroadcastHandle;
-use self::protocol::message_id_generator::MessageId;
 use self::{membership::MembershipHandle, protocol::Message};
 use crate::node::echo_broadcast::service::EchoBroadcast;
 use crate::node::noise_handler::{NoiseHandler, NoiseIO};
@@ -394,7 +393,7 @@ mod node_tests {
     use crate::node::echo_broadcast::EchoBroadcastHandle;
     use crate::node::membership::MembershipHandle;
     use crate::node::protocol::message_id_generator::{MessageId, MessageIdGenerator};
-    use crate::node::protocol::{Message, PingMessage, RoundOnePackageMessage};
+    use crate::node::protocol::{dkg, Message, PingMessage};
     #[mockall_double::double]
     use crate::node::reliable_sender::ReliableSenderHandle;
     use futures::FutureExt;
@@ -488,8 +487,8 @@ mod node_tests {
         let ctx = EchoBroadcastHandle::start_context();
         ctx.expect().returning(EchoBroadcastHandle::default);
 
-        let broadcast_message = crate::node::protocol::BroadcastProtocol::RoundOnePackage(
-            RoundOnePackageMessage::new("local".into(), "hello".into()),
+        let broadcast_message = crate::node::protocol::BroadcastProtocol::DKGRoundOnePackage(
+            dkg::round_one::PackageMessage::new("local".into(), "hello".into()),
         );
         let mut echo_broadcast_handle = EchoBroadcastHandle::default();
         echo_broadcast_handle.expect_clone().returning(|| {
