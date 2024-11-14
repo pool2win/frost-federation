@@ -19,13 +19,11 @@
 use crate::node::echo_broadcast::service::EchoBroadcast;
 #[mockall_double::double]
 use crate::node::echo_broadcast::EchoBroadcastHandle;
-use crate::node::protocol::{
-    HandshakeMessage, MembershipMessage, Protocol, RoundOnePackageMessage,
-};
+use crate::node::protocol::{dkg, HandshakeMessage, MembershipMessage, Protocol};
 use crate::node::reliable_sender::service::ReliableSend;
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
-use crate::node::{reliable_sender, State};
+use crate::node::State;
 
 use tokio::time::Duration;
 use tower::{timeout::TimeoutLayer, Layer, ServiceExt};
@@ -77,8 +75,11 @@ pub(crate) async fn initialize(
 
     let _ = echo_broadcast_service
         .oneshot(
-            RoundOnePackageMessage::new(node_id.clone(), "hello from round one package".into())
-                .into(),
+            dkg::round_one::PackageMessage::new(
+                node_id.clone(),
+                "hello from round one package".into(),
+            )
+            .into(),
         )
         .await;
 

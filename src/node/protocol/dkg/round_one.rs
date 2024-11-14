@@ -25,37 +25,37 @@ use std::task::{Context, Poll};
 use tower::{BoxError, Service};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Default)]
-pub struct RoundOnePackageMessage {
+pub struct PackageMessage {
     pub sender_id: String,
     pub message: String,
 }
 
-impl RoundOnePackageMessage {
+impl PackageMessage {
     pub fn new(sender_id: String, message: String) -> Self {
-        RoundOnePackageMessage { sender_id, message }
+        PackageMessage { sender_id, message }
     }
 }
 
 #[derive(Clone)]
-pub struct RoundOnePackage {
+pub struct Package {
     sender_id: String,
     state: State,
 }
 
-impl RoundOnePackage {
+impl Package {
     pub fn new(node_id: String, state: State) -> Self {
-        RoundOnePackage {
+        Package {
             sender_id: node_id,
             state,
         }
     }
 }
 
-/// service for handling RoundOnePackage protocol.
+/// service for handling Package protocol.
 ///
 /// By making all protocol into a Service, we can use tower:Steer to
 /// multiplex across services.
-impl Service<Message> for RoundOnePackage {
+impl Service<Message> for Package {
     type Response = Option<Message>;
     type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Option<Message>, Self::Error>> + Send>>;
@@ -76,9 +76,9 @@ impl Service<Message> for RoundOnePackage {
 #[cfg(test)]
 mod round_one_package_tests {
 
-    use super::RoundOnePackage;
+    use super::Package;
     use crate::node::protocol::message_id_generator::MessageId;
-    use crate::node::protocol::{Message, RoundOnePackageMessage};
+    use crate::node::protocol::{dkg::round_one::PackageMessage, Message};
     use crate::node::state::State;
     use crate::node::MessageIdGenerator;
     use crate::node::{membership::MembershipHandle, protocol::BroadcastProtocol};
@@ -91,13 +91,13 @@ mod round_one_package_tests {
         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
         let state = State::new(membership_handle, message_id_generator);
 
-        let mut p = RoundOnePackage::new("local".into(), state);
+        let mut p = Package::new("local".into(), state);
         let res = p
             .ready()
             .await
             .unwrap()
             .call(Message::Broadcast(
-                BroadcastProtocol::RoundOnePackage(RoundOnePackageMessage::new(
+                BroadcastProtocol::DKGRoundOnePackage(PackageMessage::new(
                     "local".to_string(),
                     "round_one_package".to_string(),
                 )),
@@ -110,6 +110,6 @@ mod round_one_package_tests {
 
     #[test]
     fn it_should_create_default_round_one_package_message() {
-        assert_eq!(RoundOnePackageMessage::default().sender_id, "".to_string())
+        assert_eq!(PackageMessage::default().sender_id, "".to_string())
     }
 }

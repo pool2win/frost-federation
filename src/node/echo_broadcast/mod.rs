@@ -407,7 +407,7 @@ mockall::mock! {
 #[cfg(test)]
 mod echo_broadcast_actor_tests {
     use super::*;
-    use crate::node::protocol::{BroadcastProtocol, RoundOnePackageMessage};
+    use crate::node::protocol::{dkg, BroadcastProtocol};
     use futures::FutureExt;
 
     #[tokio::test]
@@ -432,7 +432,7 @@ mod echo_broadcast_actor_tests {
         let mut actor = EchoBroadcastActor::start(receiver);
 
         let msg = Message::Broadcast(
-            BroadcastProtocol::RoundOnePackage(RoundOnePackageMessage {
+            BroadcastProtocol::DKGRoundOnePackage(dkg::round_one::PackageMessage {
                 sender_id: "localhost".to_string(),
                 message: "ping".to_string(),
             }),
@@ -460,7 +460,7 @@ mod echo_broadcast_actor_tests {
         let mut actor = EchoBroadcastActor::start(receiver);
 
         let msg = Message::Broadcast(
-            BroadcastProtocol::RoundOnePackage(RoundOnePackageMessage {
+            BroadcastProtocol::DKGRoundOnePackage(dkg::round_one::PackageMessage {
                 sender_id: "localhost".to_string(),
                 message: "ping".to_string(),
             }),
@@ -479,7 +479,7 @@ mod echo_broadcast_actor_tests {
         let mut second_reliable_sender_handle = ReliableSenderHandle::default();
 
         let msg = Message::Broadcast(
-            BroadcastProtocol::RoundOnePackage(RoundOnePackageMessage {
+            BroadcastProtocol::DKGRoundOnePackage(dkg::round_one::PackageMessage {
                 sender_id: "localhost".to_string(),
                 message: "ping".to_string(),
             }),
@@ -530,7 +530,7 @@ mod echo_broadcast_actor_tests {
         let mut echo_bcast_actor = EchoBroadcastActor::start(receiver);
 
         let msg = Message::Echo(
-            BroadcastProtocol::RoundOnePackage(RoundOnePackageMessage {
+            BroadcastProtocol::DKGRoundOnePackage(dkg::round_one::PackageMessage {
                 sender_id: "localhost".to_string(),
                 message: "ping".to_string(),
             }),
@@ -593,12 +593,12 @@ mod echo_broadcast_actor_tests {
         let (_sender, receiver) = mpsc::channel(32);
         let mut echo_bcast_actor = EchoBroadcastActor::start(receiver);
 
-        let msg = RoundOnePackageMessage {
+        let msg = dkg::round_one::PackageMessage {
             sender_id: "localhost".to_string(),
             message: "round one package".to_string(),
         };
         let echo_message = Message::Echo(
-            BroadcastProtocol::RoundOnePackage(msg),
+            BroadcastProtocol::DKGRoundOnePackage(msg),
             MessageId(1),
             "a".into(),
         );
@@ -638,7 +638,7 @@ mod echo_broadcast_actor_tests {
         let mut echo_bcast_actor = EchoBroadcastActor::start(receiver);
 
         let msg: Message = Message::Broadcast(
-            BroadcastProtocol::RoundOnePackage(RoundOnePackageMessage {
+            BroadcastProtocol::DKGRoundOnePackage(dkg::round_one::PackageMessage {
                 sender_id: "localhost".to_string(),
                 message: "round one package".to_string(),
             }),
@@ -653,7 +653,7 @@ mod echo_broadcast_actor_tests {
         assert_eq!(echo_bcast_actor.message_client_txs.len(), 1);
 
         let echo_b: Message = Message::Echo(
-            BroadcastProtocol::RoundOnePackage(RoundOnePackageMessage {
+            BroadcastProtocol::DKGRoundOnePackage(dkg::round_one::PackageMessage {
                 sender_id: "localhost".to_string(),
                 message: "round one package".to_string(),
             }),
@@ -661,7 +661,7 @@ mod echo_broadcast_actor_tests {
             "b".into(),
         );
         let echo_c: Message = Message::Echo(
-            BroadcastProtocol::RoundOnePackage(RoundOnePackageMessage {
+            BroadcastProtocol::DKGRoundOnePackage(dkg::round_one::PackageMessage {
                 sender_id: "localhost".to_string(),
                 message: "round one package".to_string(),
             }),
