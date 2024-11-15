@@ -16,22 +16,28 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
+use crate::node::protocol::message_id_generator::MessageId;
+use crate::node::protocol::BroadcastProtocol;
 use crate::node::protocol::Message;
+use crate::node::protocol::NetworkMessage;
 use crate::node::state::State;
+use frost_secp256k1 as frost;
+use frost_secp256k1::Identifier;
 use futures::{Future, FutureExt};
+use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower::{BoxError, Service};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct PackageMessage {
     pub sender_id: String,
-    pub message: String,
+    pub message: Option<frost::keys::dkg::round1::Package>,
 }
 
 impl PackageMessage {
-    pub fn new(sender_id: String, message: String) -> Self {
+    pub fn new(sender_id: String, message: Option<frost::keys::dkg::round1::Package>) -> Self {
         PackageMessage { sender_id, message }
     }
 }
@@ -69,7 +75,36 @@ impl Service<Message> for Package {
     /// For now, there is no response.
     fn call(&mut self, msg: Message) -> Self::Future {
         let state = self.state.clone();
-        async move { Ok(None) }.boxed()
+        let sender_id = self.sender_id.clone();
+        async move {
+            let max_min_signers = state
+                .membership_handle
+                .get_members()
+                .await
+                .map(|members| {
+                    let num_members = members.len();
+                    (num_members, (num_members * 2).div_ceil(3))
+                })
+                .unwrap();
+            let participant_identifier = Identifier::derive(sender_id.as_bytes()).unwrap();
+            let rng = thread_rng();
+            log::debug!("SIGNERS: {} {}", max_min_signers.0, max_min_signers.1);
+            let (round1_secret_package, round1_package) = frost::keys::dkg::part1(
+                participant_identifier,
+                max_min_signers.0 as u16,
+                max_min_signers.1 as u16,
+                rng,
+            )?;
+            let msg = Message::Broadcast(
+                BroadcastProtocol::DKGRoundOnePackage(PackageMessage::new(
+                    sender_id,
+                    Some(round1_package),
+                )),
+                Some(state.message_id_generator.next()),
+            );
+            Ok(Some(msg))
+        }
+        .boxed()
     }
 }
 
@@ -78,38 +113,53 @@ mod round_one_package_tests {
 
     use super::Package;
     use crate::node::protocol::message_id_generator::MessageId;
+    use crate::node::protocol::NetworkMessage;
     use crate::node::protocol::{dkg::round_one::PackageMessage, Message};
+    #[mockall_double::double]
+    use crate::node::reliable_sender::ReliableSenderHandle;
     use crate::node::state::State;
-    use crate::node::MessageIdGenerator;
+    use crate::node::{membership, MessageIdGenerator};
     use crate::node::{membership::MembershipHandle, protocol::BroadcastProtocol};
     use tower::{Service, ServiceExt};
+
+    async fn build_membership(num: usize) -> MembershipHandle {
+        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
+        for i in 0..num {
+            let mut mock_reliable_sender = ReliableSenderHandle::default();
+            mock_reliable_sender.expect_clone().returning(|| {
+                let mut mock = ReliableSenderHandle::default();
+                mock.expect_clone().returning(ReliableSenderHandle::default);
+                mock
+            });
+            let _ = membership_handle
+                .add_member(format!("localhost{}", i), mock_reliable_sender)
+                .await;
+        }
+        membership_handle
+    }
 
     #[tokio::test]
     async fn it_should_create_round_one_package_as_service_and_respond_to_round_one_package_with_none(
     ) {
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
-        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
+        let membership_handle = build_membership(3).await;
         let state = State::new(membership_handle, message_id_generator);
 
-        let mut p = Package::new("local".into(), state);
-        let res = p
+        let mut pkg = Package::new("local".into(), state);
+        let res = pkg
             .ready()
             .await
             .unwrap()
             .call(Message::Broadcast(
                 BroadcastProtocol::DKGRoundOnePackage(PackageMessage::new(
                     "local".to_string(),
-                    "round_one_package".to_string(),
+                    None,
                 )),
                 Some(MessageId(1)),
             ))
             .await
             .unwrap();
-        assert!(res.is_none());
-    }
-
-    #[test]
-    fn it_should_create_default_round_one_package_message() {
-        assert_eq!(PackageMessage::default().sender_id, "".to_string())
+        assert!(res.is_some());
+        assert_eq!(res.unwrap().get_sender_id(), "local");
     }
 }
