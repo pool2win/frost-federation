@@ -488,7 +488,7 @@ mod node_tests {
         ctx.expect().returning(EchoBroadcastHandle::default);
 
         let broadcast_message = crate::node::protocol::BroadcastProtocol::DKGRoundOnePackage(
-            dkg::round_one::PackageMessage::new("local".into(), "hello".into()),
+            dkg::round_one::PackageMessage::new("local".into(), None),
         );
         let mut echo_broadcast_handle = EchoBroadcastHandle::default();
         echo_broadcast_handle.expect_clone().returning(|| {

@@ -74,13 +74,7 @@ pub(crate) async fn initialize(
     log::info!("Sending echo broadcast");
 
     let _ = echo_broadcast_service
-        .oneshot(
-            dkg::round_one::PackageMessage::new(
-                node_id.clone(),
-                "hello from round one package".into(),
-            )
-            .into(),
-        )
+        .oneshot(dkg::round_one::PackageMessage::new(node_id.clone(), None).into())
         .await;
 
     log::info!("Echo broadcast finished");

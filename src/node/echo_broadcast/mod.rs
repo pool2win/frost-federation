@@ -434,7 +434,7 @@ mod echo_broadcast_actor_tests {
         let msg = Message::Broadcast(
             BroadcastProtocol::DKGRoundOnePackage(dkg::round_one::PackageMessage {
                 sender_id: "localhost".to_string(),
-                message: "ping".to_string(),
+                message: None,
             }),
             Some(MessageId(1)),
         );
@@ -462,7 +462,7 @@ mod echo_broadcast_actor_tests {
         let msg = Message::Broadcast(
             BroadcastProtocol::DKGRoundOnePackage(dkg::round_one::PackageMessage {
                 sender_id: "localhost".to_string(),
-                message: "ping".to_string(),
+                message: None,
             }),
             Some(MessageId(1)),
         );
@@ -481,7 +481,7 @@ mod echo_broadcast_actor_tests {
         let msg = Message::Broadcast(
             BroadcastProtocol::DKGRoundOnePackage(dkg::round_one::PackageMessage {
                 sender_id: "localhost".to_string(),
-                message: "ping".to_string(),
+                message: None,
             }),
             Some(MessageId(1)),
         );
@@ -532,7 +532,7 @@ mod echo_broadcast_actor_tests {
         let msg = Message::Echo(
             BroadcastProtocol::DKGRoundOnePackage(dkg::round_one::PackageMessage {
                 sender_id: "localhost".to_string(),
-                message: "ping".to_string(),
+                message: None,
             }),
             MessageId(1),
             "a".into(),
@@ -595,7 +595,7 @@ mod echo_broadcast_actor_tests {
 
         let msg = dkg::round_one::PackageMessage {
             sender_id: "localhost".to_string(),
-            message: "round one package".to_string(),
+            message: None,
         };
         let echo_message = Message::Echo(
             BroadcastProtocol::DKGRoundOnePackage(msg),
@@ -640,7 +640,7 @@ mod echo_broadcast_actor_tests {
         let msg: Message = Message::Broadcast(
             BroadcastProtocol::DKGRoundOnePackage(dkg::round_one::PackageMessage {
                 sender_id: "localhost".to_string(),
-                message: "round one package".to_string(),
+                message: None,
             }),
             Some(MessageId(1)),
         );
@@ -655,7 +655,7 @@ mod echo_broadcast_actor_tests {
         let echo_b: Message = Message::Echo(
             BroadcastProtocol::DKGRoundOnePackage(dkg::round_one::PackageMessage {
                 sender_id: "localhost".to_string(),
-                message: "round one package".to_string(),
+                message: None,
             }),
             MessageId(1),
             "b".into(),
@@ -663,7 +663,7 @@ mod echo_broadcast_actor_tests {
         let echo_c: Message = Message::Echo(
             BroadcastProtocol::DKGRoundOnePackage(dkg::round_one::PackageMessage {
                 sender_id: "localhost".to_string(),
-                message: "round one package".to_string(),
+                message: None,
             }),
             MessageId(1),
             "c".into(),
