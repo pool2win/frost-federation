@@ -25,3 +25,5 @@ tokio-test = "0.4.4"
 tower = {version = "0.5.1", features=["util", "steer", "timeout"] }
 pin-project = "1.1.5"
 frost-secp256k1 = "2.0.0"
+rand_core = "0.6.4"
+rand = "0.8.5"
