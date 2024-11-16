@@ -16,10 +16,8 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use crate::node::protocol::message_id_generator::MessageId;
 use crate::node::protocol::BroadcastProtocol;
 use crate::node::protocol::Message;
-use crate::node::protocol::NetworkMessage;
 use crate::node::state::State;
 use frost_secp256k1 as frost;
 use frost_secp256k1::Identifier;
@@ -113,30 +111,13 @@ mod round_one_package_tests {
 
     use super::Package;
     use crate::node::protocol::message_id_generator::MessageId;
+    use crate::node::protocol::BroadcastProtocol;
     use crate::node::protocol::NetworkMessage;
     use crate::node::protocol::{dkg::round_one::PackageMessage, Message};
-    #[mockall_double::double]
-    use crate::node::reliable_sender::ReliableSenderHandle;
     use crate::node::state::State;
-    use crate::node::{membership, MessageIdGenerator};
-    use crate::node::{membership::MembershipHandle, protocol::BroadcastProtocol};
+    use crate::node::test_helpers::support::build_membership;
+    use crate::node::MessageIdGenerator;
     use tower::{Service, ServiceExt};
-
-    async fn build_membership(num: usize) -> MembershipHandle {
-        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
-        for i in 0..num {
-            let mut mock_reliable_sender = ReliableSenderHandle::default();
-            mock_reliable_sender.expect_clone().returning(|| {
-                let mut mock = ReliableSenderHandle::default();
-                mock.expect_clone().returning(ReliableSenderHandle::default);
-                mock
-            });
-            let _ = membership_handle
-                .add_member(format!("localhost{}", i), mock_reliable_sender)
-                .await;
-        }
-        membership_handle
-    }
 
     #[tokio::test]
     async fn it_should_create_round_one_package_as_service_and_respond_to_round_one_package_with_none(

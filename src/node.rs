@@ -52,6 +52,7 @@ mod noise_handler;
 mod protocol;
 mod reliable_sender;
 mod state;
+mod test_helpers;
 
 pub struct Node {
     pub seeds: Vec<String>,
