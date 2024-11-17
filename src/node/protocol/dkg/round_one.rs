@@ -20,7 +20,6 @@ use crate::node::protocol::BroadcastProtocol;
 use crate::node::protocol::Message;
 use crate::node::state::State;
 use frost_secp256k1 as frost;
-use frost_secp256k1::Identifier;
 use futures::{Future, FutureExt};
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
@@ -37,6 +36,40 @@ pub struct PackageMessage {
 impl PackageMessage {
     pub fn new(sender_id: String, message: Option<frost::keys::dkg::round1::Package>) -> Self {
         PackageMessage { sender_id, message }
+    }
+}
+
+async fn build_round1_package(
+    sender_id: String,
+    state: crate::node::state::State,
+) -> Result<Message, frost::Error> {
+    let max_min_signers = state
+        .membership_handle
+        .get_members()
+        .await
+        .map(|members| {
+            let num_members = members.len();
+            (num_members, (num_members * 2).div_ceil(3))
+        })
+        .unwrap();
+    let participant_identifier = frost::Identifier::derive(sender_id.as_bytes()).unwrap();
+    let rng = thread_rng();
+    log::debug!("SIGNERS: {} {}", max_min_signers.0, max_min_signers.1);
+    let result = frost::keys::dkg::part1(
+        participant_identifier,
+        max_min_signers.0 as u16,
+        max_min_signers.1 as u16,
+        rng,
+    );
+    match result {
+        Ok((secret_package, round1_package)) => Ok(Message::Broadcast(
+            BroadcastProtocol::DKGRoundOnePackage(PackageMessage::new(
+                sender_id,
+                Some(round1_package),
+            )),
+            Some(state.message_id_generator.next()),
+        )),
+        Err(e) => Err(e),
     }
 }
 
@@ -75,31 +108,7 @@ impl Service<Message> for Package {
         let state = self.state.clone();
         let sender_id = self.sender_id.clone();
         async move {
-            let max_min_signers = state
-                .membership_handle
-                .get_members()
-                .await
-                .map(|members| {
-                    let num_members = members.len();
-                    (num_members, (num_members * 2).div_ceil(3))
-                })
-                .unwrap();
-            let participant_identifier = Identifier::derive(sender_id.as_bytes()).unwrap();
-            let rng = thread_rng();
-            log::debug!("SIGNERS: {} {}", max_min_signers.0, max_min_signers.1);
-            let (round1_secret_package, round1_package) = frost::keys::dkg::part1(
-                participant_identifier,
-                max_min_signers.0 as u16,
-                max_min_signers.1 as u16,
-                rng,
-            )?;
-            let msg = Message::Broadcast(
-                BroadcastProtocol::DKGRoundOnePackage(PackageMessage::new(
-                    sender_id,
-                    Some(round1_package),
-                )),
-                Some(state.message_id_generator.next()),
-            );
+            let msg = build_round1_package(sender_id, state).await?;
             Ok(Some(msg))
         }
         .boxed()
