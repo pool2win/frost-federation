@@ -16,4 +16,5 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-pub mod round_one;
+pub(crate) mod round_one;
+pub(crate) mod state;

@@ -185,7 +185,7 @@ impl Service<Message> for Protocol {
                 Message::Broadcast(BroadcastProtocol::DKGRoundOnePackage(_m), _) => {
                     BoxService::new(dkg::round_one::Package::new(sender_id, state))
                 }
-                Message::Echo(BroadcastProtocol::DKGRoundOnePackage(_m), _, _) => {
+                Message::Echo(_, _, _) => {
                     BoxService::new(dkg::round_one::Package::new(sender_id, state))
                 }
             };
