@@ -98,6 +98,8 @@ impl StateHandle {
     }
 }
 
+
+
 #[cfg(test)]
 mod dkg_state_tests {
     use super::*;
@@ -146,5 +148,44 @@ mod dkg_state_tests {
         let (tx1, _rx1) = oneshot::channel();
         actor.add_round1_package(identifier, package, tx1);
         assert_eq!(actor.state.received_round1_packages.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod dkg_state_handle_tests {
+    use super::*;
+    use rand::thread_rng;
+
+    #[tokio::test]
+    async fn test_state_handle_new() {
+        let (tx, _rx) = mpsc::channel(1);
+        let handle = StateHandle::new(tx);
+        assert!(handle.sender.capacity() > 0);
+    }
+
+    #[tokio::test]
+    async fn test_state_handle_add_round1_package() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let handle = StateHandle::new(tx);
+        
+        let identifier = frost::Identifier::derive(b"1").unwrap();
+        let (_secret_package, package) = frost::keys::dkg::part1(
+            identifier,
+            3,
+            2,
+            thread_rng(),
+        ).unwrap();
+
+        let (respond_tx, _respond_rx) = oneshot::channel();
+        
+        // Send the package
+        handle.add_round1_package(identifier, package.clone(), respond_tx).await;
+        
+        // Verify the message was received correctly
+        if let Some(StateMessage::AddRound1Package(received_package, _)) = rx.try_recv().ok() {
+            assert_eq!(received_package, package);
+        } else {
+            panic!("Failed to receive the expected message");
+        }
     }
 }
