@@ -154,6 +154,7 @@ mod round_one_package_tests {
         assert!(res.is_some());
         assert_eq!(res.unwrap().get_sender_id(), "local");
     }
+
     #[tokio::test]
     async fn it_should_serialize_and_deserialize_round_one_public_key_package() {
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
