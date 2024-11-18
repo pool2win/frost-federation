@@ -224,10 +224,11 @@ mod dkg_state_handle_tests {
         let (_secret_package, package) =
             frost::keys::dkg::part1(identifier, 3, 2, thread_rng()).unwrap();
 
-        // Send the package
-        state_handle
+        // Send the package and assert success
+        assert!(state_handle
             .add_round1_package(identifier, package.clone())
-            .await;
+            .await
+            .is_ok());
     }
 
     #[tokio::test]
@@ -238,9 +239,10 @@ mod dkg_state_handle_tests {
         let (secret_package, _package) =
             frost::keys::dkg::part1(identifier, 3, 2, thread_rng()).unwrap();
 
-        // Send the secret package
-        state_handle
+        // Send the secret package and assert success
+        assert!(state_handle
             .add_secret_package(secret_package.clone())
-            .await;
+            .await
+            .is_ok());
     }
 }
