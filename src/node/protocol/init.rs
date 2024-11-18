@@ -19,7 +19,6 @@
 use crate::node::echo_broadcast::service::EchoBroadcast;
 #[mockall_double::double]
 use crate::node::echo_broadcast::EchoBroadcastHandle;
-use crate::node::protocol::dkg::trigger::DKGTrigger;
 use crate::node::protocol::{dkg, HandshakeMessage, MembershipMessage, Protocol};
 use crate::node::reliable_sender::service::ReliableSend;
 #[mockall_double::double]
@@ -80,9 +79,9 @@ pub(crate) async fn initialize(
 
     log::info!("DKG Echo broadcast finished");
 
-    let mut dkg_trigger = DKGTrigger::new();
+    let interval = tokio::time::interval(tokio::time::Duration::from_secs(15));
     tokio::spawn(async move {
-        dkg_trigger.run().await;
+        dkg::trigger::run_dkg_trigger(interval).await;
     });
 }
 
