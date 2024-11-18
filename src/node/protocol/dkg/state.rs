@@ -17,7 +17,7 @@
 // <https://www.gnu.org/licenses/>.
 
 use frost::keys::dkg;
-use frost_secp256k1 as frost;
+use frost_secp256k1::{self as frost, Identifier};
 use std::collections::BTreeMap;
 use tokio::sync::{mpsc, oneshot};
 
@@ -44,14 +44,9 @@ impl State {
 }
 
 /// Message for state handle to actor communication
-enum StateMessage {
+pub(crate) enum StateMessage {
     /// Add a received round1 package to state
     AddRound1Package(dkg::round1::Package, oneshot::Sender<()>),
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct StateHandle {
-    sender: mpsc::Sender<StateMessage>,
 }
 
 pub(crate) struct Actor {
@@ -82,5 +77,74 @@ impl Actor {
             .received_round1_packages
             .insert(identifier, package);
         let _ = respond_to.send(());
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct StateHandle {
+    sender: mpsc::Sender<StateMessage>,
+}
+
+impl StateHandle {
+    /// Create a new state handle
+    pub fn new(sender: mpsc::Sender<StateMessage>) -> Self {
+        Self { sender }
+    }
+
+    /// Add round1 package to state
+    pub async fn add_round1_package(&self, identifier: Identifier, package: dkg::round1::Package, respond_to: oneshot::Sender<()>) {
+        let message = StateMessage::AddRound1Package(package, respond_to);
+        let _ = self.sender.send(message).await;
+    }
+}
+
+#[cfg(test)]
+mod dkg_state_tests {
+    use super::*;
+    use rand::thread_rng;
+    use std::collections::BTreeMap;
+    use tokio::sync::oneshot;
+
+    #[test]
+    fn test_state_new() {
+        let state = State::new();
+        assert_eq!(state.in_progress, false);
+        assert_eq!(state.pub_key, None);
+        assert_eq!(state.received_round1_packages, BTreeMap::new());
+    }
+
+    #[test]
+    fn test_actor_start() {
+        let (tx, rx) = mpsc::channel(1);
+        let mut actor = Actor::start(rx);
+        assert_eq!(actor.state.in_progress, false);
+    }
+
+    #[test]
+    fn test_actor_start_new_dkg() {
+        let (tx, rx) = mpsc::channel(1);
+        let mut actor = Actor::start(rx);
+        let (tx1, rx1) = oneshot::channel();
+        actor.start_new_dkg(tx1);
+        assert_eq!(actor.state.in_progress, true);
+    }
+
+    #[test]
+    fn test_actor_add_round1_package() {
+        let (_tx, rx) = mpsc::channel(1);
+        let mut actor = Actor::start(rx);
+        let identifier = frost::Identifier::derive(b"1").unwrap();
+        let rng = thread_rng();
+
+        let (_secret_package, package) = frost::keys::dkg::part1(
+            identifier,
+            3 as u16,
+            2 as u16,
+            rng,
+        ).unwrap();
+
+        let (tx1, _rx1) = oneshot::channel();
+        actor.add_round1_package(identifier, package, tx1);
+        assert_eq!(actor.state.received_round1_packages.len(), 1);
     }
 }
