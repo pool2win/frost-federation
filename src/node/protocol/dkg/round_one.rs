@@ -118,6 +118,7 @@ impl Service<Message> for Package {
 #[cfg(test)]
 mod round_one_package_tests {
 
+    use super::build_round1_package;
     use super::Package;
     use crate::node::protocol::message_id_generator::MessageId;
     use crate::node::protocol::BroadcastProtocol;
@@ -126,6 +127,7 @@ mod round_one_package_tests {
     use crate::node::state::State;
     use crate::node::test_helpers::support::build_membership;
     use crate::node::MessageIdGenerator;
+    use frost_secp256k1 as frost;
     use tower::{Service, ServiceExt};
 
     #[tokio::test]
@@ -151,5 +153,27 @@ mod round_one_package_tests {
             .unwrap();
         assert!(res.is_some());
         assert_eq!(res.unwrap().get_sender_id(), "local");
+    }
+    #[tokio::test]
+    async fn it_should_serialize_and_deserialize_round_one_public_key_package() {
+        let message_id_generator = MessageIdGenerator::new("localhost".to_string());
+        let membership_handle = build_membership(3).await;
+        let state = State::new(membership_handle, message_id_generator);
+
+        let round1_package = build_round1_package("local".into(), state).await.unwrap();
+
+        // Extract the public key package from the NetworkMessage
+        if let Message::Broadcast(BroadcastProtocol::DKGRoundOnePackage(pkg_msg), _message_id) =
+            round1_package
+        {
+            let public_key_package = pkg_msg.message.unwrap();
+
+            let serialized = public_key_package.serialize().unwrap();
+            let deserialized = frost::keys::dkg::round1::Package::deserialize(&serialized).unwrap();
+
+            assert_eq!(public_key_package, deserialized);
+        } else {
+            panic!("Expected DKGRoundOnePackage");
+        }
     }
 }
