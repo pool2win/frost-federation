@@ -126,20 +126,22 @@ impl StateHandle {
         &self,
         identifier: Identifier,
         package: dkg::round1::Package,
-        respond_to: oneshot::Sender<()>,
-    ) {
-        let message = StateMessage::AddRound1Package(identifier, package, respond_to);
+    ) -> Result<(), oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        let message = StateMessage::AddRound1Package(identifier, package, tx);
         let _ = self.sender.send(message).await;
+        rx.await
     }
 
     /// Add secret package to state
     pub async fn add_secret_package(
         &self,
         secret_package: frost::keys::dkg::round1::SecretPackage,
-        respond_to: oneshot::Sender<()>,
-    ) {
-        let message = StateMessage::AddSecretPackage(secret_package, respond_to);
+    ) -> Result<(), oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        let message = StateMessage::AddSecretPackage(secret_package, tx);
         let _ = self.sender.send(message).await;
+        rx.await
     }
 }
 
@@ -222,15 +224,10 @@ mod dkg_state_handle_tests {
         let (_secret_package, package) =
             frost::keys::dkg::part1(identifier, 3, 2, thread_rng()).unwrap();
 
-        let (respond_tx, respond_rx) = oneshot::channel();
-
         // Send the package
         state_handle
-            .add_round1_package(identifier, package.clone(), respond_tx)
+            .add_round1_package(identifier, package.clone())
             .await;
-
-        // Wait for the response
-        respond_rx.await.expect("Failed to receive response");
     }
 
     #[tokio::test]
@@ -241,14 +238,9 @@ mod dkg_state_handle_tests {
         let (secret_package, _package) =
             frost::keys::dkg::part1(identifier, 3, 2, thread_rng()).unwrap();
 
-        let (respond_tx, respond_rx) = oneshot::channel();
-
         // Send the secret package
         state_handle
-            .add_secret_package(secret_package.clone(), respond_tx)
+            .add_secret_package(secret_package.clone())
             .await;
-
-        // Wait for the response
-        respond_rx.await.expect("Failed to receive response");
     }
 }
