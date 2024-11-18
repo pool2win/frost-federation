@@ -108,8 +108,8 @@ impl Service<Message> for Package {
         let state = self.state.clone();
         let sender_id = self.sender_id.clone();
         async move {
-            let msg = build_round1_package(sender_id, state).await?;
-            Ok(Some(msg))
+            let response = build_round1_package(sender_id, state).await?;
+            Ok(Some(response))
         }
         .boxed()
     }
