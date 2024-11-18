@@ -104,19 +104,26 @@ impl StateHandle {
     }
 
     /// Add round1 package to state
-    pub async fn add_round1_package(&self, identifier: Identifier, package: dkg::round1::Package, respond_to: oneshot::Sender<()>) {
+    pub async fn add_round1_package(
+        &self,
+        identifier: Identifier,
+        package: dkg::round1::Package,
+        respond_to: oneshot::Sender<()>,
+    ) {
         let message = StateMessage::AddRound1Package(package, respond_to);
         let _ = self.sender.send(message).await;
     }
 
     /// Add secret package to state
-    pub async fn add_secret_package(&self, secret_package: frost::keys::dkg::round1::SecretPackage, respond_to: oneshot::Sender<()>) {
+    pub async fn add_secret_package(
+        &self,
+        secret_package: frost::keys::dkg::round1::SecretPackage,
+        respond_to: oneshot::Sender<()>,
+    ) {
         let message = StateMessage::AddSecretPackage(secret_package, respond_to);
         let _ = self.sender.send(message).await;
     }
 }
-
-
 
 #[cfg(test)]
 mod dkg_state_tests {
@@ -157,12 +164,8 @@ mod dkg_state_tests {
         let identifier = frost::Identifier::derive(b"1").unwrap();
         let rng = thread_rng();
 
-        let (_secret_package, package) = frost::keys::dkg::part1(
-            identifier,
-            3 as u16,
-            2 as u16,
-            rng,
-        ).unwrap();
+        let (_secret_package, package) =
+            frost::keys::dkg::part1(identifier, 3 as u16, 2 as u16, rng).unwrap();
 
         let (tx1, _rx1) = oneshot::channel();
         actor.add_round1_package(identifier, package, tx1);
@@ -176,12 +179,8 @@ mod dkg_state_tests {
         let identifier = frost::Identifier::derive(b"1").unwrap();
         let rng = thread_rng();
 
-        let (secret_package, _package) = frost::keys::dkg::part1(
-            identifier,
-            3 as u16,
-            2 as u16,
-            rng,
-        ).unwrap();
+        let (secret_package, _package) =
+            frost::keys::dkg::part1(identifier, 3 as u16, 2 as u16, rng).unwrap();
 
         let (tx1, _rx1) = oneshot::channel();
         actor.add_secret_package(secret_package.clone(), tx1);
@@ -205,20 +204,18 @@ mod dkg_state_handle_tests {
     async fn test_state_handle_add_round1_package() {
         let (tx, mut rx) = mpsc::channel(1);
         let handle = StateHandle::new(tx);
-        
+
         let identifier = frost::Identifier::derive(b"1").unwrap();
-        let (_secret_package, package) = frost::keys::dkg::part1(
-            identifier,
-            3,
-            2,
-            thread_rng(),
-        ).unwrap();
+        let (_secret_package, package) =
+            frost::keys::dkg::part1(identifier, 3, 2, thread_rng()).unwrap();
 
         let (respond_tx, _respond_rx) = oneshot::channel();
-        
+
         // Send the package
-        handle.add_round1_package(identifier, package.clone(), respond_tx).await;
-        
+        handle
+            .add_round1_package(identifier, package.clone(), respond_tx)
+            .await;
+
         // Verify the message was received correctly
         if let Some(StateMessage::AddRound1Package(received_package, _)) = rx.try_recv().ok() {
             assert_eq!(received_package, package);
@@ -230,20 +227,18 @@ mod dkg_state_handle_tests {
     async fn test_state_handle_add_secret_package() {
         let (tx, mut rx) = mpsc::channel(1);
         let handle = StateHandle::new(tx);
-        
+
         let identifier = frost::Identifier::derive(b"1").unwrap();
-        let (secret_package, _package) = frost::keys::dkg::part1(
-            identifier,
-            3,
-            2,
-            thread_rng(),
-        ).unwrap();
+        let (secret_package, _package) =
+            frost::keys::dkg::part1(identifier, 3, 2, thread_rng()).unwrap();
 
         let (respond_tx, _respond_rx) = oneshot::channel();
-        
+
         // Send the secret package
-        handle.add_secret_package(secret_package.clone(), respond_tx).await;
-        
+        handle
+            .add_secret_package(secret_package.clone(), respond_tx)
+            .await;
+
         // Verify the message was received correctly
         if let Some(StateMessage::AddSecretPackage(received_package, _)) = rx.try_recv().ok() {
             assert_eq!(received_package, secret_package);
