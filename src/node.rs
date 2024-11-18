@@ -21,7 +21,8 @@ use self::echo_broadcast::EchoBroadcastHandle;
 use self::{membership::MembershipHandle, protocol::Message};
 use crate::node::echo_broadcast::service::EchoBroadcast;
 use crate::node::noise_handler::{NoiseHandler, NoiseIO};
-use crate::node::protocol::init::initialize;
+use crate::node::protocol::dkg;
+use crate::node::protocol::init::initialize_handshake;
 use crate::node::protocol::Protocol;
 use crate::node::reliable_sender::service::ReliableSend;
 use crate::node::reliable_sender::ReliableNetworkMessage;
@@ -209,16 +210,24 @@ impl Node {
 
             let node_id = self.get_node_id();
             let state = self.state.clone();
-            let echo_broadcast_handle = self.echo_broadcast_handle.clone();
             let delivery_timeout = self.delivery_timeout;
-            let reliable_sender_handle = reliable_sender_handle.clone();
+            let reliable_sender = reliable_sender_handle.clone();
             tokio::spawn(async move {
-                let _ = initialize(
+                initialize_handshake(node_id, state, reliable_sender, delivery_timeout).await;
+            });
+
+            let node_id = self.get_node_id().clone();
+            let state = self.state.clone();
+            let echo_broadcast_handle = self.echo_broadcast_handle.clone();
+            let reliable_sender_handle = reliable_sender_handle.clone();
+            let interval = tokio::time::interval(tokio::time::Duration::from_secs(15));
+            tokio::spawn(async move {
+                dkg::trigger::run_dkg_trigger(
+                    interval,
                     node_id,
                     state,
                     echo_broadcast_handle,
                     reliable_sender_handle,
-                    delivery_timeout,
                 )
                 .await;
             });
@@ -250,6 +259,22 @@ impl Node {
                         self.echo_broadcast_handle.clone(),
                     )
                     .await;
+
+                let node_id = self.get_node_id().clone();
+                let state = self.state.clone();
+                let echo_broadcast_handle = self.echo_broadcast_handle.clone();
+                let reliable_sender_handle = reliable_sender_handle.clone();
+                let interval = tokio::time::interval(tokio::time::Duration::from_secs(15));
+                tokio::spawn(async move {
+                    dkg::trigger::run_dkg_trigger(
+                        interval,
+                        node_id,
+                        state,
+                        echo_broadcast_handle,
+                        reliable_sender_handle,
+                    )
+                    .await;
+                });
             } else {
                 log::debug!("Failed to connect to seed {}", seed);
                 return Err("Failed to connect to seed".into());

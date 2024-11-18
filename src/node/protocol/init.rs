@@ -16,10 +16,7 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use crate::node::echo_broadcast::service::EchoBroadcast;
-#[mockall_double::double]
-use crate::node::echo_broadcast::EchoBroadcastHandle;
-use crate::node::protocol::{dkg, HandshakeMessage, MembershipMessage, Protocol};
+use crate::node::protocol::{HandshakeMessage, MembershipMessage, Protocol};
 use crate::node::reliable_sender::service::ReliableSend;
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
@@ -29,20 +26,14 @@ use tokio::time::Duration;
 use tower::{timeout::TimeoutLayer, Layer, ServiceExt};
 
 /// Run initial protocols for Node
-pub(crate) async fn initialize(
+pub(crate) async fn initialize_handshake(
     node_id: String,
     state: State,
-    echo_broadcast_handle: EchoBroadcastHandle,
     reliable_sender_handle: ReliableSenderHandle,
     delivery_timeout: u64,
 ) {
-    let handshake_service = Protocol::new(
-        node_id.clone(),
-        state.clone(),
-        reliable_sender_handle.clone(),
-    );
-    let reliable_sender_service =
-        ReliableSend::new(handshake_service, reliable_sender_handle.clone());
+    let handshake_service = Protocol::new(node_id, state, reliable_sender_handle.clone());
+    let reliable_sender_service = ReliableSend::new(handshake_service, reliable_sender_handle);
     let timeout_layer = TimeoutLayer::new(Duration::from_millis(delivery_timeout));
     let _ = timeout_layer
         .layer(reliable_sender_service)
@@ -50,39 +41,6 @@ pub(crate) async fn initialize(
         .await;
 
     log::info!("Handshake finished");
-
-    // TODO: We need to trigger the KeyGen protocol from an event in
-    // the change in state, or from the commands interface. For now,
-    // to test the echo broadcast, we sleep here for a 100ms and
-    // trigger the broadcast.
-    // The test shows echo broadcast is delivered successfully.
-
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-    let round_one_service = Protocol::new(
-        node_id.clone(),
-        state.clone(),
-        reliable_sender_handle.clone(),
-    );
-    let echo_broadcast_service = EchoBroadcast::new(
-        round_one_service,
-        echo_broadcast_handle,
-        state.clone(),
-        node_id.clone(),
-    );
-
-    log::info!("Sending DKG echo broadcast");
-
-    let _ = echo_broadcast_service
-        .oneshot(dkg::round_one::PackageMessage::new(node_id.clone(), None).into())
-        .await;
-
-    log::info!("DKG Echo broadcast finished");
-
-    let interval = tokio::time::interval(tokio::time::Duration::from_secs(15));
-    tokio::spawn(async move {
-        dkg::trigger::run_dkg_trigger(interval).await;
-    });
 }
 
 pub(crate) async fn send_membership(
