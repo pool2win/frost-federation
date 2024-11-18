@@ -17,6 +17,7 @@
 // <https://www.gnu.org/licenses/>.
 
 use crate::node::membership::MembershipHandle;
+use crate::node::protocol::dkg;
 use crate::node::protocol::message_id_generator::MessageIdGenerator;
 
 /// Handlers to query/update node state
@@ -24,6 +25,7 @@ use crate::node::protocol::message_id_generator::MessageIdGenerator;
 pub(crate) struct State {
     pub(crate) membership_handle: MembershipHandle,
     pub(crate) message_id_generator: MessageIdGenerator,
+    pub(crate) dkg_state: dkg::state::StateHandle,
 }
 
 impl State {
@@ -34,6 +36,7 @@ impl State {
         Self {
             membership_handle,
             message_id_generator,
+            dkg_state: dkg::state::StateHandle::new(),
         }
     }
 }
