@@ -21,8 +21,8 @@ use frost_secp256k1::{self as frost, Identifier};
 use std::collections::BTreeMap;
 use tokio::sync::{mpsc, oneshot};
 
-type Round1Map = BTreeMap<frost::Identifier, dkg::round1::Package>;
-
+pub(crate) type Round1Map = BTreeMap<frost::Identifier, dkg::round1::Package>;
+pub(crate) type Round2Map = BTreeMap<frost::Identifier, frost::keys::dkg::round2::Package>;
 pub(crate) struct State {
     pub in_progress: bool,
     pub pub_key: Option<frost::keys::PublicKeyPackage>,
