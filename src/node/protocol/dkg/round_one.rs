@@ -39,6 +39,9 @@ impl PackageMessage {
     }
 }
 
+/// Builds a round one package for the given sender id
+/// Queries the membership to get the number of members and the threshold
+/// Builds a round one package using the frost-secp256k1 crate
 async fn build_round1_package(
     sender_id: String,
     state: crate::node::state::State,
