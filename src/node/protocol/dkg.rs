@@ -17,5 +17,6 @@
 // <https://www.gnu.org/licenses/>.
 
 pub(crate) mod round_one;
+pub(crate) mod round_two;
 pub(crate) mod state;
 pub(crate) mod trigger;

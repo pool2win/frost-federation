@@ -55,6 +55,7 @@ pub enum Unicast {
     Heartbeat(HeartbeatMessage),
     Ping(PingMessage),
     Membership(MembershipMessage),
+    DKGRoundTwoPackage(dkg::round_two::PackageMessage),
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -77,6 +78,7 @@ impl NetworkMessage for Message {
                 Unicast::Heartbeat(m) => m.sender_id.clone(),
                 Unicast::Ping(m) => m.sender_id.clone(),
                 Unicast::Membership(m) => m.sender_id.clone(),
+                Unicast::DKGRoundTwoPackage(m) => m.sender_id.clone(),
             },
             Message::Broadcast(m, _) => match m {
                 BroadcastProtocol::DKGRoundOnePackage(m) => m.sender_id.clone(),
@@ -187,6 +189,9 @@ impl Service<Message> for Protocol {
                 }
                 Message::Echo(_, _, _) => {
                     BoxService::new(dkg::round_one::Package::new(sender_id, state))
+                }
+                Message::Unicast(Unicast::DKGRoundTwoPackage(_m)) => {
+                    BoxService::new(dkg::round_two::Package::new(sender_id, state))
                 }
             };
             svc.oneshot(msg).await
