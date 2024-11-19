@@ -27,7 +27,7 @@ pub(crate) struct State {
     pub in_progress: bool,
     pub pub_key: Option<frost::keys::PublicKeyPackage>,
     pub received_round1_packages: Round1Map,
-    pub secret_package: Option<frost::keys::dkg::round1::SecretPackage>,
+    pub round1_secret_package: Option<frost::keys::dkg::round1::SecretPackage>,
 }
 
 /// Track state of DKG.
@@ -40,7 +40,7 @@ impl State {
             in_progress: false,
             pub_key: None,
             received_round1_packages: Round1Map::new(),
-            secret_package: None,
+            round1_secret_package: None,
         }
     }
 }
@@ -81,7 +81,7 @@ impl Actor {
                     self.add_secret_package(secret_package, respond_to);
                 }
                 StateMessage::GetSecretPackage(respond_to) => {
-                    let secret_package = self.state.secret_package.clone();
+                    let secret_package = self.state.round1_secret_package.clone();
                     let _ = respond_to.send(secret_package);
                 }
                 StateMessage::GetReceivedRound1Packages(respond_to) => {
@@ -109,7 +109,7 @@ impl Actor {
         secret_package: frost::keys::dkg::round1::SecretPackage,
         respond_to: oneshot::Sender<()>,
     ) {
-        self.state.secret_package = Some(secret_package);
+        self.state.round1_secret_package = Some(secret_package);
         let _ = respond_to.send(());
     }
 }
@@ -190,7 +190,7 @@ mod dkg_state_tests {
         assert_eq!(state.in_progress, false);
         assert_eq!(state.pub_key, None);
         assert_eq!(state.received_round1_packages, BTreeMap::new());
-        assert_eq!(state.secret_package, None);
+        assert_eq!(state.round1_secret_package, None);
     }
 
     #[test]
@@ -234,7 +234,7 @@ mod dkg_state_tests {
 
         let (tx1, _rx1) = oneshot::channel();
         actor.add_secret_package(secret_package.clone(), tx1);
-        assert_eq!(actor.state.secret_package, Some(secret_package));
+        assert_eq!(actor.state.round1_secret_package, Some(secret_package));
     }
 }
 
