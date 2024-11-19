@@ -109,10 +109,21 @@ impl Service<Message> for Package {
     /// For now, there is no response.
     fn call(&mut self, msg: Message) -> Self::Future {
         let state = self.state.clone();
-        let sender_id = self.sender_id.clone();
+        let this_sender_id = self.sender_id.clone();
         async move {
-            let response = build_round1_package(sender_id, state).await?;
-            Ok(Some(response))
+            match msg {
+                Message::Broadcast(
+                    BroadcastProtocol::DKGRoundOnePackage(PackageMessage {
+                        sender_id: _,
+                        message: None, // message is None, so we build a new round1 package
+                    }),
+                    _message_id,
+                ) => {
+                    let response = build_round1_package(this_sender_id, state).await?;
+                    Ok(Some(response))
+                }
+                _ => Ok(None),
+            }
         }
         .boxed()
     }
