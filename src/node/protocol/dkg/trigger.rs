@@ -38,17 +38,13 @@ pub async fn run_dkg_trigger(
         interval.tick().await;
         info!("DKG trigger: checking if DKG needs to be started");
 
-        // TODO: Add logic here to check if DKG should be triggered
-        // For example, check state conditions, membership status, etc.
-
-        // If conditions are met, trigger DKG round one
-        // trigger_dkg_round_one(
-        //     node_id.clone(),
-        //     state.clone(),
-        //     echo_broadcast_handle.clone(),
-        //     reliable_sender_handle.clone(),
-        // )
-        // .await;
+        trigger_dkg_round_one(
+            node_id.clone(),
+            state.clone(),
+            echo_broadcast_handle.clone(),
+            reliable_sender_handle.clone(),
+        )
+        .await;
     }
 }
 
@@ -58,11 +54,7 @@ pub(crate) async fn trigger_dkg_round_one(
     echo_broadcast_handle: EchoBroadcastHandle,
     reliable_sender_handle: ReliableSenderHandle,
 ) {
-    let round_one_service = Protocol::new(
-        node_id.clone(),
-        state.clone(),
-        reliable_sender_handle.clone(),
-    );
+    let round_one_service = Protocol::new(node_id.clone(), state.clone(), reliable_sender_handle);
     let echo_broadcast_service = EchoBroadcast::new(
         round_one_service,
         echo_broadcast_handle,
@@ -99,8 +91,29 @@ mod tests {
         let membership_handle = MembershipHandle::start("local".into()).await;
 
         let state = State::new(membership_handle, MessageIdGenerator::new("local".into()));
-        let echo_broadcast_handle = EchoBroadcastHandle::default();
-        let reliable_sender_handle = ReliableSenderHandle::default();
+        let mut mock_echo_broadcast_handle = EchoBroadcastHandle::default();
+        mock_echo_broadcast_handle.expect_clone().returning(|| {
+            let mut mock = EchoBroadcastHandle::default();
+            mock.expect_clone().returning(|| {
+                let mut mocked = EchoBroadcastHandle::default();
+                mocked.expect_send().return_once(|_, _| Ok(()));
+                mocked
+            });
+            mock
+        });
+
+        let mut mock_reliable_sender_handle = ReliableSenderHandle::default();
+        mock_reliable_sender_handle.expect_clone().returning(|| {
+            let mut mock = ReliableSenderHandle::default();
+            mock.expect_clone().returning(|| {
+                let mut mocked = ReliableSenderHandle::default();
+                mocked
+                    .expect_clone()
+                    .returning(|| ReliableSenderHandle::default());
+                mocked
+            });
+            mock
+        });
 
         // Wait for just over one interval to ensure we get at least one trigger
         let result = timeout(
@@ -109,8 +122,8 @@ mod tests {
                 interval,
                 node_id,
                 state,
-                echo_broadcast_handle,
-                reliable_sender_handle,
+                mock_echo_broadcast_handle,
+                mock_reliable_sender_handle,
             ),
         )
         .await;
