@@ -28,6 +28,7 @@ pub(crate) struct State {
     pub pub_key: Option<frost::keys::PublicKeyPackage>,
     pub received_round1_packages: Round1Map,
     pub round1_secret_package: Option<frost::keys::dkg::round1::SecretPackage>,
+    pub round2_secret_package: Option<frost::keys::dkg::round2::SecretPackage>,
 }
 
 /// Track state of DKG.
@@ -41,6 +42,7 @@ impl State {
             pub_key: None,
             received_round1_packages: Round1Map::new(),
             round1_secret_package: None,
+            round2_secret_package: None,
         }
     }
 }
@@ -50,9 +52,9 @@ pub(crate) enum StateMessage {
     /// Add a received round1 package to state
     AddRound1Package(frost::Identifier, dkg::round1::Package, oneshot::Sender<()>),
     /// Add a received secret package to state
-    AddSecretPackage(frost::keys::dkg::round1::SecretPackage, oneshot::Sender<()>),
+    AddRound1SecretPackage(frost::keys::dkg::round1::SecretPackage, oneshot::Sender<()>),
     /// Get a received secret package from state
-    GetSecretPackage(oneshot::Sender<Option<frost::keys::dkg::round1::SecretPackage>>),
+    GetRound1SecretPackage(oneshot::Sender<Option<frost::keys::dkg::round1::SecretPackage>>),
     /// Get received round1 packages from state
     GetReceivedRound1Packages(oneshot::Sender<Round1Map>),
 }
@@ -77,10 +79,10 @@ impl Actor {
                 StateMessage::AddRound1Package(identifier, package, respond_to) => {
                     self.add_round1_package(identifier, package, respond_to);
                 }
-                StateMessage::AddSecretPackage(secret_package, respond_to) => {
+                StateMessage::AddRound1SecretPackage(secret_package, respond_to) => {
                     self.add_secret_package(secret_package, respond_to);
                 }
-                StateMessage::GetSecretPackage(respond_to) => {
+                StateMessage::GetRound1SecretPackage(respond_to) => {
                     let secret_package = self.state.round1_secret_package.clone();
                     let _ = respond_to.send(secret_package);
                 }
@@ -146,22 +148,22 @@ impl StateHandle {
     }
 
     /// Add secret package to state
-    pub async fn add_secret_package(
+    pub async fn add_round1_secret_package(
         &self,
         secret_package: frost::keys::dkg::round1::SecretPackage,
     ) -> Result<(), oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
-        let message = StateMessage::AddSecretPackage(secret_package, tx);
+        let message = StateMessage::AddRound1SecretPackage(secret_package, tx);
         let _ = self.sender.send(message).await;
         rx.await
     }
 
     /// Get a received secret package from state
-    pub async fn get_secret_package(
+    pub async fn get_round1_secret_package(
         &self,
     ) -> Result<Option<frost::keys::dkg::round1::SecretPackage>, oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
-        let message = StateMessage::GetSecretPackage(tx);
+        let message = StateMessage::GetRound1SecretPackage(tx);
         let _ = self.sender.send(message).await;
         rx.await
     }
@@ -191,6 +193,7 @@ mod dkg_state_tests {
         assert_eq!(state.pub_key, None);
         assert_eq!(state.received_round1_packages, BTreeMap::new());
         assert_eq!(state.round1_secret_package, None);
+        assert_eq!(state.round2_secret_package, None);
     }
 
     #[test]
@@ -275,10 +278,14 @@ mod dkg_state_handle_tests {
 
         // Send the secret package and assert success
         assert!(state_handle
-            .add_secret_package(secret_package.clone())
+            .add_round1_secret_package(secret_package.clone())
             .await
             .is_ok());
-        let secret_package = state_handle.get_secret_package().await.unwrap().unwrap();
+        let secret_package = state_handle
+            .get_round1_secret_package()
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(secret_package, secret_package);
     }
 }

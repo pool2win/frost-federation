@@ -88,7 +88,7 @@ pub async fn build_round2_packages(
         .unwrap();
     println!("{:?}", max_min_signers);
 
-    let secret_package = match state.dkg_state.get_secret_package().await.unwrap() {
+    let secret_package = match state.dkg_state.get_round1_secret_package().await.unwrap() {
         Some(package) => package,
         None => return Err(frost::Error::InvalidSecretShare),
     };
@@ -155,7 +155,7 @@ mod round_two_tests {
         // add our secret package to state
         state
             .dkg_state
-            .add_secret_package(secret_package)
+            .add_round1_secret_package(secret_package)
             .await
             .unwrap();
 
