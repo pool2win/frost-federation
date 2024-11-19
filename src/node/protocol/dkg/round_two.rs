@@ -20,6 +20,7 @@ use crate::node;
 use crate::node::protocol::Message;
 use crate::node::protocol::Unicast;
 use frost_secp256k1 as frost;
+use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use std::{
     future::Future,
@@ -85,6 +86,7 @@ pub async fn build_round2_packages(
             (num_members, (num_members * 2).div_ceil(3))
         })
         .unwrap();
+    println!("{:?}", max_min_signers);
 
     let secret_package = match state.dkg_state.get_secret_package().await.unwrap() {
         Some(package) => package,
@@ -96,6 +98,7 @@ pub async fn build_round2_packages(
         .get_received_round1_packages()
         .await
         .unwrap();
+    println!("{:?}", received_packages.len());
 
     if received_packages.len() < max_min_signers.1 {
         return Err(frost::Error::InvalidMinSigners);
@@ -108,6 +111,8 @@ pub async fn build_round2_packages(
 
 #[cfg(test)]
 mod round_two_tests {
+    use node::dkg::state::Round1Map;
+
     use super::*;
     use crate::node::test_helpers::support::build_membership;
 
@@ -127,11 +132,73 @@ mod round_two_tests {
     }
 
     #[tokio::test]
-    async fn test_package_message_creation() {
-        let sender_id = "node1".to_string();
-        let package_msg = PackageMessage::new(sender_id.clone(), None);
+    async fn test_build_round2_packages_valid() {
+        let membership_handle = build_membership(3).await;
+        let state = node::state::State::new(
+            membership_handle,
+            MessageIdGenerator::new("local".to_string()),
+        );
 
-        assert_eq!(package_msg.sender_id, sender_id);
-        assert!(package_msg.message.is_none());
+        let rng = thread_rng();
+        let mut round1_packages = Round1Map::new();
+
+        // generate our round1 secret and package
+        let (secret_package, round1_package) = frost::keys::dkg::part1(
+            frost::Identifier::derive(b"node1").unwrap(),
+            3,
+            2,
+            rng.clone(),
+        )
+        .unwrap();
+        log::debug!("Secret package {:?}", secret_package);
+
+        // add our secret package to state
+        state
+            .dkg_state
+            .add_secret_package(secret_package)
+            .await
+            .unwrap();
+
+        // round1_packages.insert(frost::Identifier::derive(b"node1").unwrap(), round1_package);
+
+        // Add packages for other nodes
+        let (_, round1_package2) = frost::keys::dkg::part1(
+            frost::Identifier::derive(b"node2").unwrap(),
+            3,
+            2,
+            rng.clone(),
+        )
+        .unwrap();
+        round1_packages.insert(
+            frost::Identifier::derive(b"node2").unwrap(),
+            round1_package2,
+        );
+
+        let (_, round1_package3) = frost::keys::dkg::part1(
+            frost::Identifier::derive(b"node3").unwrap(),
+            3,
+            2,
+            rng.clone(),
+        )
+        .unwrap();
+        round1_packages.insert(
+            frost::Identifier::derive(b"node3").unwrap(),
+            round1_package3,
+        );
+
+        // add all round1 packages to state
+        for (id, package) in round1_packages {
+            state
+                .dkg_state
+                .add_round1_package(id, package)
+                .await
+                .unwrap();
+        }
+
+        let result = build_round2_packages("node1".to_string(), state).await;
+        println!("{:?}", result);
+        assert!(result.is_ok());
+        let round2_packages = result.unwrap();
+        assert_eq!(round2_packages.len(), 2);
     }
 }
