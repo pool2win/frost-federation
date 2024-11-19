@@ -51,6 +51,10 @@ pub(crate) enum StateMessage {
     AddRound1Package(frost::Identifier, dkg::round1::Package, oneshot::Sender<()>),
     /// Add a received secret package to state
     AddSecretPackage(frost::keys::dkg::round1::SecretPackage, oneshot::Sender<()>),
+    /// Get a received secret package from state
+    GetSecretPackage(oneshot::Sender<Option<frost::keys::dkg::round1::SecretPackage>>),
+    /// Get received round1 packages from state
+    GetReceivedRound1Packages(oneshot::Sender<Round1Map>),
 }
 
 pub(crate) struct Actor {
@@ -75,6 +79,14 @@ impl Actor {
                 }
                 StateMessage::AddSecretPackage(secret_package, respond_to) => {
                     self.add_secret_package(secret_package, respond_to);
+                }
+                StateMessage::GetSecretPackage(respond_to) => {
+                    let secret_package = self.state.secret_package.clone();
+                    let _ = respond_to.send(secret_package);
+                }
+                StateMessage::GetReceivedRound1Packages(respond_to) => {
+                    let received_round1_packages = self.state.received_round1_packages.clone();
+                    let _ = respond_to.send(received_round1_packages);
                 }
             }
         }
@@ -140,6 +152,26 @@ impl StateHandle {
     ) -> Result<(), oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
         let message = StateMessage::AddSecretPackage(secret_package, tx);
+        let _ = self.sender.send(message).await;
+        rx.await
+    }
+
+    /// Get a received secret package from state
+    pub async fn get_secret_package(
+        &self,
+    ) -> Result<Option<frost::keys::dkg::round1::SecretPackage>, oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        let message = StateMessage::GetSecretPackage(tx);
+        let _ = self.sender.send(message).await;
+        rx.await
+    }
+
+    /// Get a received round1 packages from state
+    pub async fn get_received_round1_packages(
+        &self,
+    ) -> Result<Round1Map, oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        let message = StateMessage::GetReceivedRound1Packages(tx);
         let _ = self.sender.send(message).await;
         rx.await
     }
@@ -229,6 +261,8 @@ mod dkg_state_handle_tests {
             .add_round1_package(identifier, package.clone())
             .await
             .is_ok());
+        let received_round1_packages = state_handle.get_received_round1_packages().await.unwrap();
+        assert_eq!(received_round1_packages.len(), 1);
     }
 
     #[tokio::test]
@@ -244,5 +278,7 @@ mod dkg_state_handle_tests {
             .add_secret_package(secret_package.clone())
             .await
             .is_ok());
+        let secret_package = state_handle.get_secret_package().await.unwrap().unwrap();
+        assert_eq!(secret_package, secret_package);
     }
 }

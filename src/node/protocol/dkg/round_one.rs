@@ -62,13 +62,16 @@ async fn build_round1_package(
         rng,
     );
     match result {
-        Ok((secret_package, round1_package)) => Ok(Message::Broadcast(
-            BroadcastProtocol::DKGRoundOnePackage(PackageMessage::new(
-                sender_id,
-                Some(round1_package),
-            )),
-            Some(state.message_id_generator.next()),
-        )),
+        Ok((secret_package, round1_package)) => {
+            let _ = state.dkg_state.add_secret_package(secret_package).await;
+            Ok(Message::Broadcast(
+                BroadcastProtocol::DKGRoundOnePackage(PackageMessage::new(
+                    sender_id,
+                    Some(round1_package),
+                )),
+                Some(state.message_id_generator.next()),
+            ))
+        }
         Err(e) => Err(e),
     }
 }
