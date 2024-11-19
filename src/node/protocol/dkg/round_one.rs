@@ -125,6 +125,22 @@ impl Service<Message> for Package {
                     let response = build_round1_package(this_sender_id, state).await?;
                     Ok(Some(response))
                 }
+                Message::Broadcast(
+                    BroadcastProtocol::DKGRoundOnePackage(PackageMessage {
+                        sender_id: from_sender_id,
+                        message: Some(message), // received a message
+                    }),
+                    _message_id,
+                ) => {
+                    log::debug!("Received message {:?}", message);
+                    let identifier = frost::Identifier::derive(from_sender_id.as_bytes()).unwrap();
+                    state
+                        .dkg_state
+                        .add_round1_package(identifier, message)
+                        .await
+                        .unwrap();
+                    Ok(None)
+                }
                 _ => Ok(None),
             }
         }
@@ -193,5 +209,43 @@ mod round_one_package_tests {
         } else {
             panic!("Expected DKGRoundOnePackage");
         }
+    }
+
+    #[tokio::test]
+    async fn it_should_store_received_round_one_package_in_state() {
+        let message_id_generator = MessageIdGenerator::new("localhost".to_string());
+        let membership_handle = build_membership(3).await;
+        let state = State::new(membership_handle, message_id_generator);
+        let state_clone = state.clone();
+
+        // First create a round1 package that we'll pretend came from another node
+        let round1_package = build_round1_package("remote".into(), state).await.unwrap();
+
+        // Create our local package service
+        let mut pkg = Package::new("local".into(), state_clone);
+
+        // Send the round1 package to our service
+        let res = pkg
+            .ready()
+            .await
+            .unwrap()
+            .call(round1_package)
+            .await
+            .unwrap();
+
+        // No response expected when receiving a package
+        assert!(res.is_none());
+
+        // Verify the package was stored in state
+        let received_packages = pkg
+            .state
+            .dkg_state
+            .get_received_round1_packages()
+            .await
+            .unwrap();
+        assert_eq!(received_packages.len(), 1);
+
+        let remote_id = frost::Identifier::derive("remote".as_bytes()).unwrap();
+        assert!(received_packages.contains_key(&remote_id));
     }
 }
