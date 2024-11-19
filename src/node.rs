@@ -70,10 +70,10 @@ impl Node {
         let bind_address = "localhost".to_string();
         let message_id_generator = MessageIdGenerator::new(bind_address.clone());
         let echo_broadcast_handle = EchoBroadcastHandle::start().await;
-        let state = State {
-            membership_handle: MembershipHandle::start(bind_address.clone()).await,
+        let state = State::new(
+            MembershipHandle::start(bind_address.clone()).await,
             message_id_generator,
-        };
+        );
         Node {
             seeds: vec!["localhost:6680".to_string()],
             bind_address: bind_address.clone(),

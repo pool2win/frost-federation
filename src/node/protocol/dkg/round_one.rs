@@ -62,13 +62,16 @@ async fn build_round1_package(
         rng,
     );
     match result {
-        Ok((secret_package, round1_package)) => Ok(Message::Broadcast(
-            BroadcastProtocol::DKGRoundOnePackage(PackageMessage::new(
-                sender_id,
-                Some(round1_package),
-            )),
-            Some(state.message_id_generator.next()),
-        )),
+        Ok((secret_package, round1_package)) => {
+            let _ = state.dkg_state.add_secret_package(secret_package).await;
+            Ok(Message::Broadcast(
+                BroadcastProtocol::DKGRoundOnePackage(PackageMessage::new(
+                    sender_id,
+                    Some(round1_package),
+                )),
+                Some(state.message_id_generator.next()),
+            ))
+        }
         Err(e) => Err(e),
     }
 }
@@ -154,6 +157,7 @@ mod round_one_package_tests {
         assert!(res.is_some());
         assert_eq!(res.unwrap().get_sender_id(), "local");
     }
+
     #[tokio::test]
     async fn it_should_serialize_and_deserialize_round_one_public_key_package() {
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
