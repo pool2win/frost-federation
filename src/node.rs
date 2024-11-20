@@ -212,9 +212,7 @@ impl Node {
             let state = self.state.clone();
             let delivery_timeout = self.delivery_timeout;
             let reliable_sender = reliable_sender_handle.clone();
-            tokio::spawn(async move {
-                initialize_handshake(node_id, state, reliable_sender, delivery_timeout).await;
-            });
+            initialize_handshake(node_id, state, reliable_sender, delivery_timeout).await;
 
             let node_id = self.get_node_id().clone();
             let state = self.state.clone();
