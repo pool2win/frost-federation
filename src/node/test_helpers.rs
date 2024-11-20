@@ -22,9 +22,11 @@ pub(crate) mod support {
     #[mockall_double::double]
     use crate::node::reliable_sender::ReliableSenderHandle;
 
+    /// Builds a membership with the given number of nodes
+    /// Do not add the local node to the membership, therefore it loops from 1 to num
     pub(crate) async fn build_membership(num: usize) -> MembershipHandle {
         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
-        for i in 0..num {
+        for i in 1..num {
             let mut mock_reliable_sender = ReliableSenderHandle::default();
             mock_reliable_sender.expect_clone().returning(|| {
                 let mut mock = ReliableSenderHandle::default();

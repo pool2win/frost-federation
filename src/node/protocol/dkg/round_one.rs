@@ -16,6 +16,7 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
+use crate::node::protocol::dkg::get_max_min_signers;
 use crate::node::protocol::BroadcastProtocol;
 use crate::node::protocol::Message;
 use crate::node::state::State;
@@ -46,22 +47,15 @@ async fn build_round1_package(
     sender_id: String,
     state: crate::node::state::State,
 ) -> Result<Message, frost::Error> {
-    let max_min_signers = state
-        .membership_handle
-        .get_members()
-        .await
-        .map(|members| {
-            let num_members = members.len();
-            (num_members, (num_members * 2).div_ceil(3))
-        })
-        .unwrap();
+    let (max_signers, min_signers) = get_max_min_signers(&state).await;
+
     let participant_identifier = frost::Identifier::derive(sender_id.as_bytes()).unwrap();
     let rng = thread_rng();
-    log::debug!("SIGNERS: {} {}", max_min_signers.0, max_min_signers.1);
+    log::debug!("SIGNERS: {} {}", max_signers, min_signers);
     let result = frost::keys::dkg::part1(
         participant_identifier,
-        max_min_signers.0 as u16,
-        max_min_signers.1 as u16,
+        max_signers as u16,
+        min_signers as u16,
         rng,
     );
     match result {
