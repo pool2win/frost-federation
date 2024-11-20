@@ -188,7 +188,8 @@ impl Service<Message> for Protocol {
                     BoxService::new(dkg::round_one::Package::new(sender_id, state))
                 }
                 Message::Echo(_, _, _) => {
-                    BoxService::new(dkg::round_one::Package::new(sender_id, state))
+                    // Don't respond to echo messages, by returning None
+                    BoxService::new(tower::service_fn(|_| async { Ok(None) }))
                 }
                 Message::Unicast(Unicast::DKGRoundTwoPackage(_m)) => {
                     BoxService::new(dkg::round_two::Package::new(sender_id, state))
