@@ -32,8 +32,8 @@ pub(crate) async fn initialize_handshake(
     reliable_sender_handle: ReliableSenderHandle,
     delivery_timeout: u64,
 ) {
-    let handshake_service = Protocol::new(node_id, state, reliable_sender_handle.clone());
-    let reliable_sender_service = ReliableSend::new(handshake_service, reliable_sender_handle);
+    let protocol_service = Protocol::new(node_id, state, reliable_sender_handle.clone());
+    let reliable_sender_service = ReliableSend::new(protocol_service, reliable_sender_handle);
     let timeout_layer = TimeoutLayer::new(Duration::from_millis(delivery_timeout));
     let _ = timeout_layer
         .layer(reliable_sender_service)
