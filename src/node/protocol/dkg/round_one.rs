@@ -66,6 +66,7 @@ async fn build_round1_package(
     );
     match result {
         Ok((secret_package, round1_package)) => {
+            log::debug!("Setting round one package as {:?}", round1_package);
             let _ = state
                 .dkg_state
                 .add_round1_secret_package(secret_package)
@@ -128,6 +129,7 @@ impl Service<Message> for Package {
                 ) => {
                     log::debug!("Build round one package");
                     let response = build_round1_package(this_sender_id, state).await?;
+                    log::debug!("Sending round one package {:?}", response);
                     Ok(Some(response))
                 }
                 Message::Broadcast(
