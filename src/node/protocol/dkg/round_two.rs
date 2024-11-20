@@ -17,10 +17,9 @@
 // <https://www.gnu.org/licenses/>.
 
 use crate::node;
+use crate::node::dkg::state::Round2Map;
 use crate::node::protocol::Message;
-use crate::node::protocol::Unicast;
 use frost_secp256k1 as frost;
-use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use std::{
     future::Future,
@@ -28,8 +27,6 @@ use std::{
     task::{Context, Poll},
 };
 use tower::Service;
-
-use super::state::Round2Map;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct PackageMessage {
@@ -76,7 +73,7 @@ impl Service<Message> for Package {
 pub async fn build_round2_packages(
     sender_id: String,
     state: crate::node::state::State,
-) -> Result<Round2Map, frost::Error> {
+) -> Result<(frost::keys::dkg::round2::SecretPackage, Round2Map), frost::Error> {
     let max_min_signers = state
         .membership_handle
         .get_members()
@@ -86,7 +83,6 @@ pub async fn build_round2_packages(
             (num_members, (num_members * 2).div_ceil(3))
         })
         .unwrap();
-    println!("{:?}", max_min_signers);
 
     let secret_package = match state.dkg_state.get_round1_secret_package().await.unwrap() {
         Some(package) => package,
@@ -98,7 +94,7 @@ pub async fn build_round2_packages(
         .get_received_round1_packages()
         .await
         .unwrap();
-    println!("{:?}", received_packages.len());
+    log::debug!("Received round1 packages: {:?}", received_packages.len());
 
     if received_packages.len() < max_min_signers.1 {
         return Err(frost::Error::InvalidMinSigners);
@@ -106,17 +102,16 @@ pub async fn build_round2_packages(
 
     let (round2_secret, round2_packages) =
         frost::keys::dkg::part2(secret_package, &received_packages)?;
-    Ok(round2_packages)
+    Ok((round2_secret, round2_packages))
 }
 
 #[cfg(test)]
 mod round_two_tests {
-    use node::dkg::state::Round1Map;
-
     use super::*;
-    use crate::node::test_helpers::support::build_membership;
-
     use crate::node::protocol::message_id_generator::MessageIdGenerator;
+    use crate::node::test_helpers::support::build_membership;
+    use node::dkg::state::Round1Map;
+    use rand::thread_rng;
 
     #[tokio::test]
     async fn test_build_round2_packages_insufficient_packages() {
@@ -159,8 +154,6 @@ mod round_two_tests {
             .await
             .unwrap();
 
-        // round1_packages.insert(frost::Identifier::derive(b"node1").unwrap(), round1_package);
-
         // Add packages for other nodes
         let (_, round1_package2) = frost::keys::dkg::part1(
             frost::Identifier::derive(b"node2").unwrap(),
@@ -196,9 +189,8 @@ mod round_two_tests {
         }
 
         let result = build_round2_packages("node1".to_string(), state).await;
-        println!("{:?}", result);
         assert!(result.is_ok());
-        let round2_packages = result.unwrap();
+        let (round2_secret, round2_packages) = result.unwrap();
         assert_eq!(round2_packages.len(), 2);
     }
 }
