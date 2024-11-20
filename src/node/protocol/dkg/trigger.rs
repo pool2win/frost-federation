@@ -24,17 +24,20 @@ use crate::node::protocol::{dkg, Protocol};
 use crate::node::reliable_sender::ReliableSenderHandle;
 use crate::node::State;
 use log::info;
-use tokio::time::Interval;
+use tokio::time::{Duration, Instant};
 use tower::ServiceExt;
 
 pub async fn run_dkg_trigger(
-    mut interval: Interval,
+    duration_millis: u64,
     node_id: String,
     state: State,
     echo_broadcast_handle: EchoBroadcastHandle,
     reliable_sender_handle: ReliableSenderHandle,
 ) {
+    let period = Duration::from_millis(duration_millis);
     loop {
+        let start = Instant::now() + period;
+        let mut interval = tokio::time::interval_at(start, period);
         interval.tick().await;
         info!("DKG trigger: checking if DKG needs to be started");
 
@@ -54,9 +57,9 @@ pub(crate) async fn trigger_dkg_round_one(
     echo_broadcast_handle: EchoBroadcastHandle,
     reliable_sender_handle: ReliableSenderHandle,
 ) {
-    let round_one_service = Protocol::new(node_id.clone(), state.clone(), reliable_sender_handle);
+    let protocol_service = Protocol::new(node_id.clone(), state.clone(), reliable_sender_handle);
     let echo_broadcast_service = EchoBroadcast::new(
-        round_one_service,
+        protocol_service,
         echo_broadcast_handle,
         state,
         node_id.clone(),
@@ -116,10 +119,10 @@ mod tests {
         });
 
         // Wait for just over one interval to ensure we get at least one trigger
-        let result = timeout(
+        let result: Result<(), time::error::Elapsed> = timeout(
             Duration::from_millis(110),
             run_dkg_trigger(
-                interval,
+                15,
                 node_id,
                 state,
                 mock_echo_broadcast_handle,
