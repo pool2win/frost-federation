@@ -144,8 +144,7 @@ where
                             return
                         }
                         let msg = message.unwrap().freeze();
-                        log::debug!("Received from network {:?}", msg.clone());
-                         actor.handle_received(msg.clone()).await.unwrap();
+                        actor.handle_received(msg.clone()).await.unwrap();
                     },
                     None => { // Stream closed, return to clear up connection
                         log::debug!("Connection actor reader closed");

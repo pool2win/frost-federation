@@ -116,6 +116,7 @@ impl Service<Message> for Package {
     fn call(&mut self, msg: Message) -> Self::Future {
         let state = self.state.clone();
         let this_sender_id = self.sender_id.clone();
+        log::debug!("Handle round one package {:?}", msg);
         async move {
             match msg {
                 Message::Broadcast(
@@ -125,6 +126,7 @@ impl Service<Message> for Package {
                     }),
                     _message_id,
                 ) => {
+                    log::debug!("Build round one package");
                     let response = build_round1_package(this_sender_id, state).await?;
                     Ok(Some(response))
                 }
@@ -135,6 +137,7 @@ impl Service<Message> for Package {
                     }),
                     _message_id,
                 ) => {
+                    log::debug!("Received round one package");
                     log::debug!("Received message {:?}", message);
                     let identifier = frost::Identifier::derive(from_sender_id.as_bytes()).unwrap();
                     state
@@ -144,7 +147,10 @@ impl Service<Message> for Package {
                         .unwrap();
                     Ok(None)
                 }
-                _ => Ok(None),
+                _ => {
+                    log::debug!("Unhandled message {:?}", msg);
+                    Ok(None)
+                }
             }
         }
         .boxed()
