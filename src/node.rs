@@ -218,10 +218,9 @@ impl Node {
             let state = self.state.clone();
             let echo_broadcast_handle = self.echo_broadcast_handle.clone();
             let reliable_sender_handle = reliable_sender_handle.clone();
-            let interval = tokio::time::interval(tokio::time::Duration::from_secs(15));
             tokio::spawn(async move {
                 dkg::trigger::run_dkg_trigger(
-                    interval,
+                    15000,
                     node_id,
                     state,
                     echo_broadcast_handle,
@@ -265,7 +264,7 @@ impl Node {
                 let interval = tokio::time::interval(tokio::time::Duration::from_secs(15));
                 tokio::spawn(async move {
                     dkg::trigger::run_dkg_trigger(
-                        interval,
+                        15000,
                         node_id,
                         state,
                         echo_broadcast_handle,
