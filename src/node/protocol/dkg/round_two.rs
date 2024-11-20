@@ -18,6 +18,7 @@
 
 use crate::node;
 use crate::node::dkg::state::Round2Map;
+use crate::node::protocol::dkg::get_max_min_signers;
 use crate::node::protocol::Message;
 use frost_secp256k1 as frost;
 use serde::{Deserialize, Serialize};
@@ -74,15 +75,8 @@ pub async fn build_round2_packages(
     sender_id: String,
     state: crate::node::state::State,
 ) -> Result<(frost::keys::dkg::round2::SecretPackage, Round2Map), frost::Error> {
-    let max_min_signers = state
-        .membership_handle
-        .get_members()
-        .await
-        .map(|members| {
-            let num_members = members.len();
-            (num_members, (num_members * 2).div_ceil(3))
-        })
-        .unwrap();
+    let (max_signers, min_signers) = get_max_min_signers(&state).await;
+    println!("SIGNERS: {} {}", max_signers, min_signers);
 
     let secret_package = match state.dkg_state.get_round1_secret_package().await.unwrap() {
         Some(package) => package,
@@ -96,7 +90,8 @@ pub async fn build_round2_packages(
         .unwrap();
     log::debug!("Received round1 packages: {:?}", received_packages.len());
 
-    if received_packages.len() < max_min_signers.1 {
+    // We need at least min_signers to proceed
+    if received_packages.len() < min_signers {
         return Err(frost::Error::InvalidMinSigners);
     }
 

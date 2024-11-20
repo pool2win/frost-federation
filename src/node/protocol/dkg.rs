@@ -20,3 +20,12 @@ pub(crate) mod round_one;
 pub(crate) mod round_two;
 pub(crate) mod state;
 pub(crate) mod trigger;
+
+use crate::node::state::State;
+
+/// Get the max and min signers for the DKG
+pub(crate) async fn get_max_min_signers(state: &State) -> (usize, usize) {
+    let members = state.membership_handle.get_members().await.unwrap();
+    let num_members = members.len() + 1;
+    (num_members, (num_members * 2).div_ceil(3))
+}
