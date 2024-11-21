@@ -23,7 +23,6 @@ use crate::node::protocol::{dkg, Protocol};
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
 use crate::node::State;
-use log::info;
 use tokio::time::{Duration, Instant};
 use tower::ServiceExt;
 
@@ -39,7 +38,6 @@ pub async fn run_dkg_trigger(
         let start = Instant::now() + period;
         let mut interval = tokio::time::interval_at(start, period);
         interval.tick().await;
-        info!("DKG trigger: checking if DKG needs to be started");
 
         trigger_dkg_round_one(
             node_id.clone(),
@@ -65,13 +63,13 @@ pub(crate) async fn trigger_dkg_round_one(
         node_id.clone(),
     );
 
-    log::info!("Sending DKG echo broadcast");
+    log::debug!("Sending DKG echo broadcast");
 
     let _ = echo_broadcast_service
         .oneshot(dkg::round_one::PackageMessage::new(node_id, None).into())
         .await;
 
-    log::info!("DKG Echo broadcast finished");
+    log::debug!("DKG Echo broadcast finished");
 }
 
 #[cfg(test)]
