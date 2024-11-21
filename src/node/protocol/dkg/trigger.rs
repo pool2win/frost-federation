@@ -26,6 +26,8 @@ use crate::node::State;
 use tokio::time::{Duration, Instant};
 use tower::ServiceExt;
 
+/// Runs the DKG trigger loop.
+/// This will trigger the DKG round one protocol at a given interval.
 pub async fn run_dkg_trigger(
     duration_millis: u64,
     node_id: String,
@@ -49,6 +51,8 @@ pub async fn run_dkg_trigger(
     }
 }
 
+/// Triggers the DKG round one protocol.
+/// This will return once the round package has been successfully sent to all members.
 pub(crate) async fn trigger_dkg_round_one(
     node_id: String,
     state: State,
@@ -64,8 +68,11 @@ pub(crate) async fn trigger_dkg_round_one(
     );
 
     log::debug!("Sending DKG echo broadcast");
+    let echo_broadcast_timeout_service = tower::ServiceBuilder::new()
+        .timeout(Duration::from_secs(10))
+        .service(echo_broadcast_service);
 
-    let _ = echo_broadcast_service
+    let _ = echo_broadcast_timeout_service
         .oneshot(dkg::round_one::PackageMessage::new(node_id, None).into())
         .await;
 
