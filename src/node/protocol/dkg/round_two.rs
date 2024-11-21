@@ -16,18 +16,19 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use crate::node;
 use crate::node::dkg::state::Round2Map;
 use crate::node::protocol::dkg::get_max_min_signers;
 use crate::node::protocol::Message;
+use crate::node::{self, protocol::Unicast};
 use frost_secp256k1 as frost;
+use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use std::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
-use tower::Service;
+use tower::{BoxError, Service};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct PackageMessage {
@@ -51,20 +52,82 @@ impl Package {
     pub fn new(sender_id: String, state: node::State) -> Self {
         Package { sender_id, state }
     }
+
+    /// Send round2 packages to all members using reliable sender
+    pub async fn send_round2_packages(&self, round2_packages: Round2Map) -> Result<(), BoxError> {
+        let members = self.state.membership_handle.get_members().await?;
+        for (member_id, reliable_sender) in members {
+            // Derive identifier from member id
+            let identifier = frost::Identifier::derive(member_id.as_bytes())?;
+
+            // Get corresponding round2 package for this member
+            if let Some(package) = round2_packages.get(&identifier) {
+                // Create package message
+                let message = PackageMessage::new(self.sender_id.clone(), Some(package.clone()));
+                // Wrap package message in Message::Unicast
+                let message = Message::Unicast(Unicast::DKGRoundTwoPackage(message));
+                // Send via reliable sender
+                if reliable_sender.send(message).await.is_err() {
+                    return Err("Failed to send round2 package".into());
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Service<Message> for Package {
     type Response = Option<Message>;
-    type Error = Box<dyn std::error::Error + Send + Sync>;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Error = BoxError;
+    type Future = Pin<Box<dyn Future<Output = Result<Option<Message>, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, _req: Message) -> Self::Future {
-        // Implementation will be provided later
-        todo!()
+    fn call(&mut self, msg: Message) -> Self::Future {
+        let this = self.clone();
+        let sender_id = this.sender_id.clone();
+        let state = this.state.clone();
+
+        async move {
+            match msg {
+                Message::Unicast(Unicast::DKGRoundTwoPackage(PackageMessage {
+                    sender_id: _,
+                    message: None, // message is None, so we build a new round2 package
+                })) => {
+                    match build_round2_packages(sender_id, state.clone()).await {
+                        Ok((round2_secret_package, round2_packages)) => {
+                            // Store the round2 secret package
+                            if let Err(e) = state
+                                .dkg_state
+                                .add_round2_secret_package(round2_secret_package)
+                                .await
+                            {
+                                log::error!("Failed to store round2 secret package: {:?}", e);
+                                return Err(e.into());
+                            }
+                            // Send round2 packages to all members
+                            if let Err(e) = this.send_round2_packages(round2_packages).await {
+                                log::error!("Failed to send round2 packages: {:?}", e);
+                                return Err(e.into());
+                            }
+                            log::debug!("Sent round2 packages");
+                            Ok(None)
+                        }
+                        Err(e) => {
+                            log::error!("Failed to build round2 packages: {:?}", e);
+                            Err(e.into())
+                        }
+                    }
+                }
+                _ => {
+                    // Received round2 message
+                    todo!()
+                }
+            }
+        }
+        .boxed()
     }
 }
 
@@ -76,19 +139,21 @@ pub async fn build_round2_packages(
     state: crate::node::state::State,
 ) -> Result<(frost::keys::dkg::round2::SecretPackage, Round2Map), frost::Error> {
     let (max_signers, min_signers) = get_max_min_signers(&state).await;
-    println!("SIGNERS: {} {}", max_signers, min_signers);
+    println!("ROUND2: SIGNERS: {} {}", max_signers, min_signers);
 
     let secret_package = match state.dkg_state.get_round1_secret_package().await.unwrap() {
         Some(package) => package,
         None => return Err(frost::Error::InvalidSecretShare),
     };
 
+    println!("1");
+
     let received_packages = state
         .dkg_state
         .get_received_round1_packages()
         .await
         .unwrap();
-    log::debug!("Received round1 packages: {:?}", received_packages.len());
+    println!("Received round1 packages: {:?}", received_packages.len());
 
     // We need at least min_signers to proceed
     if received_packages.len() < min_signers {
@@ -121,9 +186,8 @@ mod round_two_tests {
         assert_eq!(result, frost::Error::InvalidSecretShare);
     }
 
-    #[tokio::test]
-    async fn test_build_round2_packages_valid() {
-        let membership_handle = build_membership(3).await;
+    async fn build_round2_state(num_nodes: usize) -> (node::state::State, Round1Map) {
+        let membership_handle = build_membership(num_nodes).await;
         let state = node::state::State::new(
             membership_handle,
             MessageIdGenerator::new("local".to_string()),
@@ -173,6 +237,12 @@ mod round_two_tests {
             frost::Identifier::derive(b"node3").unwrap(),
             round1_package3,
         );
+        (state, round1_packages)
+    }
+
+    #[tokio::test]
+    async fn test_build_round2_packages_should_succeed() {
+        let (state, round1_packages) = build_round2_state(3).await;
 
         // add all round1 packages to state
         for (id, package) in round1_packages {
@@ -187,5 +257,30 @@ mod round_two_tests {
         assert!(result.is_ok());
         let (round2_secret, round2_packages) = result.unwrap();
         assert_eq!(round2_packages.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_send_round2_packages_without_errors() {
+        let _ = env_logger::try_init();
+        let (state, round1_packages) = build_round2_state(3).await;
+
+        // add all round1 packages to state
+        for (identifier, package) in round1_packages {
+            state
+                .dkg_state
+                .add_round1_package(identifier, package)
+                .await
+                .unwrap();
+        }
+
+        // call the package service to send round2 packages
+        let mut pkg = Package::new("local".into(), state);
+        let res = pkg
+            .call(Message::Unicast(Unicast::DKGRoundTwoPackage(
+                PackageMessage::new("local".to_string(), None),
+            )))
+            .await
+            .unwrap();
+        assert!(res.is_none());
     }
 }
