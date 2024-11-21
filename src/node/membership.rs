@@ -19,8 +19,8 @@
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
 use std::collections::HashMap;
-use std::error::Error;
 use tokio::sync::{mpsc, oneshot};
+use tower::BoxError;
 pub type ReliableSenderMap = HashMap<String, ReliableSenderHandle>;
 
 pub enum MembershipMessage {
@@ -97,7 +97,7 @@ impl MembershipHandle {
         &self,
         member: String,
         handle: ReliableSenderHandle,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), BoxError> {
         let (respond_to, receiver) = oneshot::channel();
         let msg = MembershipMessage::Add(member.clone(), handle, respond_to);
         let _ = self.sender.send(msg).await;
@@ -110,7 +110,7 @@ impl MembershipHandle {
         }
     }
 
-    pub async fn remove_member(&self, member: String) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn remove_member(&self, member: String) -> Result<(), BoxError> {
         let (respond_to, receiver) = oneshot::channel();
         let msg = MembershipMessage::Remove(member, respond_to);
         let _ = self.sender.send(msg).await;
@@ -122,7 +122,7 @@ impl MembershipHandle {
         }
     }
 
-    pub async fn get_members(&self) -> Result<ReliableSenderMap, Box<dyn Error>> {
+    pub async fn get_members(&self) -> Result<ReliableSenderMap, BoxError> {
         let (respond_to, receiver) = oneshot::channel();
         if self
             .sender
