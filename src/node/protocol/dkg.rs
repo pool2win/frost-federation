@@ -29,3 +29,18 @@ pub(crate) async fn get_max_min_signers(state: &State) -> (usize, usize) {
     let num_members = members.len() + 1;
     (num_members, (num_members * 2).div_ceil(3))
 }
+#[cfg(test)]
+mod tests {
+    use frost_secp256k1 as frost;
+
+    #[test]
+    /// A test to check that the derive function is deterministic. Keeping it for future reference.
+    fn test_identifier_derive() {
+        let id1 = frost::Identifier::derive(b"test_node").unwrap();
+        let id2 = frost::Identifier::derive(b"test_node").unwrap();
+        assert_eq!(id1, id2);
+
+        let id3 = frost::Identifier::derive(b"different_node").unwrap();
+        assert_ne!(id1, id3);
+    }
+}
