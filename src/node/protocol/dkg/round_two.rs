@@ -56,21 +56,30 @@ impl Package {
     /// Send round2 packages to all members using reliable sender
     pub async fn send_round2_packages(&self, round2_packages: Round2Map) -> Result<(), BoxError> {
         let members = self.state.membership_handle.get_members().await?;
-        for (member_id, reliable_sender) in members {
-            // Derive identifier from member id
-            let identifier = frost::Identifier::derive(member_id.as_bytes())?;
+        if members.len() != round2_packages.len() {
+            log::error!(
+                "Members: {:?} != Round2 packages: {:?}",
+                members.len(),
+                round2_packages.len()
+            );
+            return Err("Members and round2 packages length mismatch".into());
+        }
 
-            // Get corresponding round2 package for this member
-            if let Some(package) = round2_packages.get(&identifier) {
-                // Create package message
-                let message = PackageMessage::new(self.sender_id.clone(), Some(package.clone()));
-                // Wrap package message in Message::Unicast
-                let message = Message::Unicast(Unicast::DKGRoundTwoPackage(message));
-                // Send via reliable sender
-                if reliable_sender.send(message).await.is_err() {
-                    return Err("Failed to send round2 package".into());
-                }
+        // Zip the members with round2_packages directly, this is safe because we know the lengths are the same and it is efficient since we avoid the extra lookup
+        for ((member_id, reliable_sender), (_, package)) in
+            members.into_iter().zip(round2_packages.iter())
+        {
+            log::debug!("Sending to member: {:?}", member_id);
+            // Create package message
+            let message = PackageMessage::new(self.sender_id.clone(), Some(package.clone()));
+            // Wrap package message in Message::Unicast
+            let message = Message::Unicast(Unicast::DKGRoundTwoPackage(message));
+            // Send via reliable sender
+            if reliable_sender.send(message).await.is_err() {
+                log::error!("Failed to send round2 package to {:?}", member_id);
+                return Err("Failed to send round2 package".into());
             }
+            log::debug!("Sent round2 package to {:?}", member_id);
         }
         Ok(())
     }
@@ -167,8 +176,10 @@ pub async fn build_round2_packages(
 mod round_two_tests {
     use super::*;
     use crate::node::protocol::message_id_generator::MessageIdGenerator;
+    #[mockall_double::double]
+    use crate::node::reliable_sender::ReliableSenderHandle;
     use crate::node::test_helpers::support::build_membership;
-    use node::dkg::state::Round1Map;
+    use node::{dkg::state::Round1Map, MembershipHandle};
     use rand::thread_rng;
 
     #[tokio::test]
@@ -184,13 +195,7 @@ mod round_two_tests {
         assert_eq!(result, frost::Error::InvalidSecretShare);
     }
 
-    async fn build_round2_state(num_nodes: usize) -> (node::state::State, Round1Map) {
-        let membership_handle = build_membership(num_nodes).await;
-        let state = node::state::State::new(
-            membership_handle,
-            MessageIdGenerator::new("local".to_string()),
-        );
-
+    async fn build_round2_state(state: node::state::State) -> (node::state::State, Round1Map) {
         let rng = thread_rng();
         let mut round1_packages = Round1Map::new();
 
@@ -240,7 +245,23 @@ mod round_two_tests {
 
     #[tokio::test]
     async fn test_build_round2_packages_should_succeed() {
-        let (state, round1_packages) = build_round2_state(3).await;
+        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
+        for i in 1..3 {
+            let mut mock_reliable_sender = ReliableSenderHandle::default();
+            mock_reliable_sender.expect_clone().returning(|| {
+                let mut mock = ReliableSenderHandle::default();
+                mock.expect_clone().returning(ReliableSenderHandle::default);
+                mock
+            });
+            let _ = membership_handle
+                .add_member(format!("localhost{}", i), mock_reliable_sender)
+                .await;
+        }
+        let state = node::state::State::new(
+            membership_handle,
+            MessageIdGenerator::new("local".to_string()),
+        );
+        let (state, round1_packages) = build_round2_state(state).await;
 
         // add all round1 packages to state
         for (id, package) in round1_packages {
@@ -260,7 +281,26 @@ mod round_two_tests {
     #[tokio::test]
     async fn test_send_round2_packages_without_errors() {
         let _ = env_logger::try_init();
-        let (state, round1_packages) = build_round2_state(3).await;
+        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
+        for i in 1..3 {
+            let mut mock_reliable_sender = ReliableSenderHandle::default();
+            mock_reliable_sender.expect_clone().returning(|| {
+                let mut mock = ReliableSenderHandle::default();
+                mock.expect_clone().returning(ReliableSenderHandle::default);
+                mock.expect_send()
+                    //.times(1)
+                    .returning(|_| futures::future::ok(()).boxed());
+                mock
+            });
+            let _ = membership_handle
+                .add_member(format!("localhost{}", i), mock_reliable_sender)
+                .await;
+        }
+        let state = node::state::State::new(
+            membership_handle,
+            MessageIdGenerator::new("local".to_string()),
+        );
+        let (state, round1_packages) = build_round2_state(state).await;
 
         // add all round1 packages to state
         for (identifier, package) in round1_packages {
@@ -280,5 +320,67 @@ mod round_two_tests {
             .await
             .unwrap();
         assert!(res.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_send_round2_packages_with_error() {
+        let _ = env_logger::try_init();
+
+        let membership_handle = MembershipHandle::start("localhost".to_string()).await;
+
+        let state = node::state::State::new(
+            membership_handle.clone(),
+            MessageIdGenerator::new("local".to_string()),
+        );
+
+        let mut mock_reliable_sender = ReliableSenderHandle::default();
+        mock_reliable_sender.expect_clone().returning(|| {
+            let mut mock = ReliableSenderHandle::default();
+            mock.expect_clone().returning(ReliableSenderHandle::default);
+            mock.expect_send()
+                //.times(1)
+                .return_once(|_| futures::future::ok(()).boxed());
+            mock
+        });
+        let _ = membership_handle
+            .add_member("localhost1".to_string(), mock_reliable_sender)
+            .await;
+
+        // Make one of the reliable senders return an error
+        let mut mock_reliable_sender = ReliableSenderHandle::default();
+        mock_reliable_sender.expect_clone().returning(|| {
+            let mut mock = ReliableSenderHandle::default();
+            mock.expect_clone().returning(ReliableSenderHandle::default);
+            mock.expect_send()
+                //.times(1)
+                .return_once(|_| futures::future::err("Some error".into()).boxed());
+            mock
+        });
+
+        let (mut state, round1_packages) = build_round2_state(state).await;
+
+        state
+            .membership_handle
+            .add_member("localhost2".to_string(), mock_reliable_sender)
+            .await
+            .unwrap();
+
+        // add all round1 packages to state
+        for (identifier, package) in round1_packages {
+            state
+                .dkg_state
+                .add_round1_package(identifier, package)
+                .await
+                .unwrap();
+        }
+
+        // call the package service to send round2 packages
+        let mut pkg = Package::new("local".into(), state);
+        let res = pkg
+            .call(Message::Unicast(Unicast::DKGRoundTwoPackage(
+                PackageMessage::new("local".to_string(), None),
+            )))
+            .await;
+        assert!(res.is_err());
     }
 }
