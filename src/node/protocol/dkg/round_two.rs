@@ -54,7 +54,10 @@ impl Package {
     }
 
     /// Send round2 packages to all members using reliable sender
-    pub async fn send_round2_packages(&self, round2_packages: Round2Map) -> Result<(), BoxError> {
+    pub async fn send_round2_packages(
+        &self,
+        round2_packages: Round2Map,
+    ) -> Result<(usize, usize), BoxError> {
         let members = self.state.membership_handle.get_members().await?;
         if members.len() != round2_packages.len() {
             log::error!(
@@ -64,24 +67,38 @@ impl Package {
             );
             return Err("Members and round2 packages length mismatch".into());
         }
+        // Collect all the futures into a Vec
+        let send_futures: Vec<_> = members
+            .into_iter()
+            .zip(round2_packages.iter())
+            .map(|((member_id, reliable_sender), (_, package))| {
+                let message = PackageMessage::new(self.sender_id.clone(), Some(package.clone()));
+                let message = Message::Unicast(Unicast::DKGRoundTwoPackage(message));
+                log::debug!("Queueing send to member: {:?}", member_id);
+                reliable_sender.send(message)
+            })
+            .collect();
 
-        // Zip the members with round2_packages directly, this is safe because we know the lengths are the same and it is efficient since we avoid the extra lookup
-        for ((member_id, reliable_sender), (_, package)) in
-            members.into_iter().zip(round2_packages.iter())
-        {
-            log::debug!("Sending to member: {:?}", member_id);
-            // Create package message
-            let message = PackageMessage::new(self.sender_id.clone(), Some(package.clone()));
-            // Wrap package message in Message::Unicast
-            let message = Message::Unicast(Unicast::DKGRoundTwoPackage(message));
-            // Send via reliable sender
-            if reliable_sender.send(message).await.is_err() {
-                log::error!("Failed to send round2 package to {:?}", member_id);
-                return Err("Failed to send round2 package".into());
-            }
-            log::debug!("Sent round2 package to {:?}", member_id);
+        // Wait for all futures to complete, collecting errors
+        let results = futures::future::join_all(send_futures).await;
+        // Count successes and failures
+        let (successes, failures): (usize, usize) =
+            results.iter().fold((0, 0), |(s, f), result| match result {
+                Ok(_) => (s + 1, f),
+                Err(_) => (s, f + 1),
+            });
+        log::debug!(
+            "Round2 package sends: {} succeeded, {} failed",
+            successes,
+            failures
+        );
+
+        // Check if any sends failed. We will change this to the threshold later
+        if failures > 0 {
+            log::error!("One or more round2 package sends failed");
+            return Err("Failed to send some round2 packages".into());
         }
-        Ok(())
+        Ok((successes, failures))
     }
 }
 
