@@ -49,7 +49,7 @@ pub(crate) mod support {
 
         // generate our round1 secret and package
         let (secret_package, round1_package) = frost::keys::dkg::part1(
-            frost::Identifier::derive(b"node1").unwrap(),
+            frost::Identifier::derive(b"localhost").unwrap(),
             3,
             2,
             rng.clone(),
@@ -66,26 +66,26 @@ pub(crate) mod support {
 
         // Add packages for other nodes
         let (_, round1_package2) = frost::keys::dkg::part1(
-            frost::Identifier::derive(b"node2").unwrap(),
+            frost::Identifier::derive(b"localhost1").unwrap(),
             3,
             2,
             rng.clone(),
         )
         .unwrap();
         round1_packages.insert(
-            frost::Identifier::derive(b"node2").unwrap(),
+            frost::Identifier::derive(b"localhost1").unwrap(),
             round1_package2,
         );
 
         let (_, round1_package3) = frost::keys::dkg::part1(
-            frost::Identifier::derive(b"node3").unwrap(),
+            frost::Identifier::derive(b"localhost2").unwrap(),
             3,
             2,
             rng.clone(),
         )
         .unwrap();
         round1_packages.insert(
-            frost::Identifier::derive(b"node3").unwrap(),
+            frost::Identifier::derive(b"localhost2").unwrap(),
             round1_package3,
         );
         (state, round1_packages)
