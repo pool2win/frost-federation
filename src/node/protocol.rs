@@ -132,6 +132,12 @@ impl From<dkg::round_one::PackageMessage> for Message {
     }
 }
 
+impl From<dkg::round_two::PackageMessage> for Message {
+    fn from(value: dkg::round_two::PackageMessage) -> Self {
+        Message::Unicast(Unicast::DKGRoundTwoPackage(value))
+    }
+}
+
 impl From<BroadcastProtocol> for Message {
     fn from(value: BroadcastProtocol) -> Self {
         match value {
