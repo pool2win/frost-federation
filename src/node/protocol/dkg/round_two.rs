@@ -183,7 +183,11 @@ pub async fn build_round2_packages(
     state: crate::node::state::State,
 ) -> Result<(frost::keys::dkg::round2::SecretPackage, Round2Map), frost::Error> {
     let (max_signers, min_signers) = get_max_min_signers(&state).await;
-    log::debug!("ROUND2: SIGNERS: {} {}", max_signers, min_signers);
+    log::info!(
+        "Building round2 packages with max signers = {} and min signers = {}",
+        max_signers,
+        min_signers
+    );
 
     let secret_package = match state.dkg_state.get_round1_secret_package().await.unwrap() {
         Some(package) => package,
@@ -195,7 +199,10 @@ pub async fn build_round2_packages(
         .get_received_round1_packages()
         .await
         .unwrap();
-    log::debug!("Received round1 packages: {:?}", received_packages.len());
+    log::info!(
+        "Received round1 packages count = {}",
+        received_packages.len()
+    );
 
     // We need at least min_signers to proceed
     if received_packages.len() < min_signers {
