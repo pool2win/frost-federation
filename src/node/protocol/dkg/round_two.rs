@@ -67,11 +67,13 @@ impl Package {
             );
             return Err("Members and round2 packages length mismatch".into());
         }
+
         // Collect all the futures into a Vec
         let send_futures: Vec<_> = members
             .into_iter()
-            .zip(round2_packages.iter())
-            .map(|((member_id, reliable_sender), (_, package))| {
+            .map(|(member_id, reliable_sender)| {
+                let identifier = frost::Identifier::derive(member_id.as_bytes()).unwrap();
+                let package = round2_packages.get(&identifier).unwrap();
                 let message = PackageMessage::new(self.sender_id.clone(), Some(package.clone()));
                 let message = Message::Unicast(Unicast::DKGRoundTwoPackage(message));
                 log::debug!("Queueing send to member: {:?}", member_id);
@@ -336,7 +338,7 @@ mod round_two_tests {
             let mut mock = ReliableSenderHandle::default();
             mock.expect_clone().returning(ReliableSenderHandle::default);
             mock.expect_send()
-                //.times(1)
+                // .times(1)
                 .return_once(|_| futures::future::err("Some error".into()).boxed());
             mock
         });
