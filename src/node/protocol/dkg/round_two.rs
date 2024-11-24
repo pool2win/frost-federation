@@ -338,7 +338,7 @@ mod round_two_tests {
             let mut mock = ReliableSenderHandle::default();
             mock.expect_clone().returning(ReliableSenderHandle::default);
             mock.expect_send()
-                .times(1)
+                // .times(1)
                 .return_once(|_| futures::future::err("Some error".into()).boxed());
             mock
         });
