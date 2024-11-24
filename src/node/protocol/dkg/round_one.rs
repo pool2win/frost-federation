@@ -123,7 +123,7 @@ impl Service<Message> for Package {
                 ) => {
                     log::debug!("Build round one package");
                     let response = build_round1_package(this_sender_id, state).await?;
-                    log::debug!("Sending round one package {:?}", response);
+                    log::info!("Sending round one package {:?}", response);
                     Ok(Some(response))
                 }
                 Message::Broadcast(
@@ -134,7 +134,7 @@ impl Service<Message> for Package {
                     _message_id,
                 ) => {
                     log::debug!("Received round one package");
-                    log::debug!("Received message {:?}", message);
+                    log::info!("Received message {:?}", message);
                     let identifier = frost::Identifier::derive(from_sender_id.as_bytes()).unwrap();
                     state
                         .dkg_state
