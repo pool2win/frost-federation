@@ -59,28 +59,40 @@ pub(crate) async fn trigger_dkg_round_one(
     echo_broadcast_handle: EchoBroadcastHandle,
     reliable_sender_handle: ReliableSenderHandle,
 ) {
-    let protocol_service = Protocol::new(node_id.clone(), state.clone(), reliable_sender_handle);
+    let protocol_service: Protocol =
+        Protocol::new(node_id.clone(), state.clone(), reliable_sender_handle);
     let echo_broadcast_service = EchoBroadcast::new(
-        protocol_service,
+        protocol_service.clone(),
         echo_broadcast_handle,
         state,
         node_id.clone(),
     );
 
-    log::debug!("Sending DKG echo broadcast");
+    log::info!("Sending DKG echo broadcast");
     let echo_broadcast_timeout_service = tower::ServiceBuilder::new()
         .timeout(Duration::from_secs(10))
         .service(echo_broadcast_service);
 
     let _ = echo_broadcast_timeout_service
-        .oneshot(dkg::round_one::PackageMessage::new(node_id, None).into())
+        .oneshot(dkg::round_one::PackageMessage::new(node_id.clone(), None).into())
         .await;
+    log::info!("DKG Echo broadcast finished");
 
-    log::debug!("DKG Echo broadcast finished");
+    // TODO[DKG]: We need to check if round one successfully finised.
+
+    log::info!("Sending DKG round two message");
+    let round_two_timeout_service = tower::ServiceBuilder::new()
+        .timeout(Duration::from_secs(10))
+        .service(protocol_service);
+
+    let _ = round_two_timeout_service
+        .oneshot(dkg::round_two::PackageMessage::new(node_id, None).into())
+        .await;
+    log::info!("DKG round two message finished");
 }
 
 #[cfg(test)]
-mod tests {
+mod dkg_trigger_tests {
     use super::*;
     use tokio::time::{self, timeout};
 
@@ -115,9 +127,13 @@ mod tests {
             let mut mock = ReliableSenderHandle::default();
             mock.expect_clone().returning(|| {
                 let mut mocked = ReliableSenderHandle::default();
-                mocked
-                    .expect_clone()
-                    .returning(|| ReliableSenderHandle::default());
+                mocked.expect_clone().returning(|| {
+                    let mut mocked = ReliableSenderHandle::default();
+                    mocked
+                        .expect_clone()
+                        .returning(|| ReliableSenderHandle::default());
+                    mocked
+                });
                 mocked
             });
             mock
