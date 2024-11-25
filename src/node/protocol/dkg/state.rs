@@ -30,6 +30,8 @@ pub(crate) struct State {
     pub received_round2_packages: Round2Map,
     pub round1_secret_package: Option<frost::keys::dkg::round1::SecretPackage>,
     pub round2_secret_package: Option<frost::keys::dkg::round2::SecretPackage>,
+    pub key_package: Option<frost::keys::KeyPackage>,
+    pub public_key_package: Option<frost::keys::PublicKeyPackage>,
 }
 
 /// Track state of DKG.
@@ -45,6 +47,8 @@ impl State {
             received_round2_packages: Round2Map::new(),
             round1_secret_package: None,
             round2_secret_package: None,
+            key_package: None,
+            public_key_package: None,
         }
     }
 }
@@ -78,6 +82,18 @@ pub(crate) enum StateMessage {
         frost::keys::dkg::round2::Package,
         oneshot::Sender<()>,
     ),
+
+    /// Set the key package
+    SetKeyPackage(frost::keys::KeyPackage, oneshot::Sender<()>),
+
+    /// Get the key package
+    GetKeyPackage(oneshot::Sender<Option<frost::keys::KeyPackage>>),
+
+    /// Set the public key package
+    SetPublicKeyPackage(frost::keys::PublicKeyPackage, oneshot::Sender<()>),
+
+    /// Get the public key package
+    GetPublicKeyPackage(oneshot::Sender<Option<frost::keys::PublicKeyPackage>>),
 }
 
 pub(crate) struct Actor {
@@ -123,6 +139,18 @@ impl Actor {
                 }
                 StateMessage::AddRound2Package(identifier, package, respond_to) => {
                     self.add_round2_package(identifier, package, respond_to);
+                }
+                StateMessage::SetKeyPackage(key_package, respond_to) => {
+                    self.set_key_package(key_package, respond_to);
+                }
+                StateMessage::GetKeyPackage(respond_to) => {
+                    self.get_key_package(respond_to);
+                }
+                StateMessage::SetPublicKeyPackage(public_key_package, respond_to) => {
+                    self.set_public_key_package(public_key_package, respond_to);
+                }
+                StateMessage::GetPublicKeyPackage(respond_to) => {
+                    self.get_public_key_package(respond_to);
                 }
             }
         }
@@ -181,6 +209,37 @@ impl Actor {
     fn get_received_round2_packages(&self, respond_to: oneshot::Sender<Round2Map>) {
         let received_round2_packages = self.state.received_round2_packages.clone();
         let _ = respond_to.send(received_round2_packages);
+    }
+
+    fn set_key_package(
+        &mut self,
+        key_package: frost::keys::KeyPackage,
+        respond_to: oneshot::Sender<()>,
+    ) {
+        self.state.key_package = Some(key_package);
+        let _ = respond_to.send(());
+    }
+
+    fn get_key_package(&self, respond_to: oneshot::Sender<Option<frost::keys::KeyPackage>>) {
+        let key_package = self.state.key_package.clone();
+        let _ = respond_to.send(key_package);
+    }
+
+    fn set_public_key_package(
+        &mut self,
+        public_key_package: frost::keys::PublicKeyPackage,
+        respond_to: oneshot::Sender<()>,
+    ) {
+        self.state.public_key_package = Some(public_key_package);
+        let _ = respond_to.send(());
+    }
+
+    fn get_public_key_package(
+        &self,
+        respond_to: oneshot::Sender<Option<frost::keys::PublicKeyPackage>>,
+    ) {
+        let public_key_package = self.state.public_key_package.clone();
+        let _ = respond_to.send(public_key_package);
     }
 }
 
@@ -285,6 +344,48 @@ impl StateHandle {
     ) -> Result<(), oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
         let message = StateMessage::AddRound2Package(identifier, package, tx);
+        let _ = self.sender.send(message).await;
+        rx.await
+    }
+
+    /// Set the key package
+    pub async fn set_key_package(
+        &self,
+        key_package: frost::keys::KeyPackage,
+    ) -> Result<(), oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        let message = StateMessage::SetKeyPackage(key_package, tx);
+        let _ = self.sender.send(message).await;
+        rx.await
+    }
+
+    /// Get the key package
+    pub async fn get_key_package(
+        &self,
+    ) -> Result<Option<frost::keys::KeyPackage>, oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        let message = StateMessage::GetKeyPackage(tx);
+        let _ = self.sender.send(message).await;
+        rx.await
+    }
+
+    /// Set the public key package
+    pub async fn set_public_key_package(
+        &self,
+        public_key_package: frost::keys::PublicKeyPackage,
+    ) -> Result<(), oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        let message = StateMessage::SetPublicKeyPackage(public_key_package, tx);
+        let _ = self.sender.send(message).await;
+        rx.await
+    }
+
+    /// Get the public key package
+    pub async fn get_public_key_package(
+        &self,
+    ) -> Result<Option<frost::keys::PublicKeyPackage>, oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        let message = StateMessage::GetPublicKeyPackage(tx);
         let _ = self.sender.send(message).await;
         rx.await
     }
