@@ -398,6 +398,7 @@ mod dkg_state_tests {
     #[mockall_double::double]
     use crate::node::reliable_sender::ReliableSenderHandle;
     use crate::node::{test_helpers::support::build_round2_state, MembershipHandle};
+    use frost_secp256k1::keys::KeyPackage;
     use futures::FutureExt;
     use rand::thread_rng;
     use std::collections::BTreeMap;
@@ -508,6 +509,41 @@ mod dkg_state_tests {
         let received_packages = rx.await.unwrap();
         assert_eq!(received_packages.len(), 2);
     }
+
+    #[tokio::test]
+    async fn test_actor_set_get_key_package() {
+        let (_tx, rx) = mpsc::channel(1);
+        let mut actor = Actor::new(rx);
+
+        // Get test packages
+        let (key_package, public_key_package) =
+            crate::node::test_helpers::support::setup_test_dkg_packages();
+
+        // Test setting
+        let (tx1, _rx1) = oneshot::channel();
+        actor.set_key_package(key_package.clone(), tx1);
+        assert_eq!(actor.state.key_package, Some(key_package.clone()));
+
+        // Test getting
+        let (tx2, rx2) = oneshot::channel();
+        actor.get_key_package(tx2);
+        let retrieved_package = rx2.await.unwrap();
+        assert_eq!(retrieved_package, Some(key_package));
+
+        // Test setting
+        let (tx1, _rx1) = oneshot::channel();
+        actor.set_public_key_package(public_key_package.clone(), tx1);
+        assert_eq!(
+            actor.state.public_key_package,
+            Some(public_key_package.clone())
+        );
+
+        // Test getting
+        let (tx2, rx2) = oneshot::channel();
+        actor.get_public_key_package(tx2);
+        let retrieved_package = rx2.await.unwrap();
+        assert_eq!(retrieved_package, Some(public_key_package));
+    }
 }
 
 #[cfg(test)]
@@ -573,7 +609,7 @@ mod dkg_state_handle_tests {
         let mut round1_packages = Round1Map::new();
 
         // generate our round1 secret and package
-        let (secret_package, round1_package) = frost::keys::dkg::part1(
+        let (secret_package, _round1_package) = frost::keys::dkg::part1(
             frost::Identifier::derive(b"node1").unwrap(),
             3,
             2,
@@ -623,7 +659,7 @@ mod dkg_state_handle_tests {
                 .unwrap();
         }
 
-        let (round2_secret_package, round2_package) =
+        let (round2_secret_package, _round2_package) =
             crate::node::protocol::dkg::round_two::build_round2_packages(
                 "node1".to_string(),
                 state.clone(),
@@ -644,5 +680,43 @@ mod dkg_state_handle_tests {
             .unwrap()
             .unwrap();
         assert_eq!(secret_package, secret_package);
+    }
+
+    #[tokio::test]
+    async fn test_state_handle_set_get_key_package() {
+        let state_handle = StateHandle::new();
+
+        // Get test packages
+        let (key_package, public_key_package) =
+            crate::node::test_helpers::support::setup_test_dkg_packages();
+
+        // Test setting
+        assert!(state_handle
+            .set_key_package(key_package.clone())
+            .await
+            .is_ok());
+
+        // Test getting
+        let retrieved_package = state_handle.get_key_package().await.unwrap();
+        assert_eq!(retrieved_package, Some(key_package));
+    }
+
+    #[tokio::test]
+    async fn test_state_handle_set_get_public_key_package() {
+        let state_handle = StateHandle::new();
+
+        // Get test packages
+        let (key_package, public_key_package) =
+            crate::node::test_helpers::support::setup_test_dkg_packages();
+
+        // Test setting
+        assert!(state_handle
+            .set_public_key_package(public_key_package.clone())
+            .await
+            .is_ok());
+
+        // Test getting
+        let retrieved_package = state_handle.get_public_key_package().await.unwrap();
+        assert_eq!(retrieved_package, Some(public_key_package));
     }
 }
