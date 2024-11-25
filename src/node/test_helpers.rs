@@ -24,6 +24,7 @@ pub(crate) mod support {
     use crate::node::{self, protocol::dkg::state::Round1Map};
     use frost_secp256k1 as frost;
     use rand::thread_rng;
+    use std::collections::BTreeMap;
 
     /// Builds a membership with the given number of nodes
     /// Do not add the local node to the membership, therefore it loops from 1 to num
@@ -89,5 +90,57 @@ pub(crate) mod support {
             round1_package3,
         );
         (state, round1_packages)
+    }
+
+    /// Test support function, hand crafted to run DKG with three parties.
+    pub fn setup_test_dkg_packages() -> (frost::keys::KeyPackage, frost::keys::PublicKeyPackage) {
+        let mut rng = thread_rng();
+        let identifier_a = frost::Identifier::derive(b"localhost_a").unwrap();
+        let identifier_b = frost::Identifier::derive(b"localhost_b").unwrap();
+        let identifier_c = frost::Identifier::derive(b"localhost_c").unwrap();
+
+        // Generate round 1 packages
+        let (secret_package_a, package_a) =
+            frost::keys::dkg::part1(identifier_a, 3, 2, &mut rng).unwrap();
+
+        let (secret_package_b, package_b) =
+            frost::keys::dkg::part1(identifier_b, 3, 2, &mut rng).unwrap();
+
+        let (secret_package_c, package_c) =
+            frost::keys::dkg::part1(identifier_c, 3, 2, &mut rng).unwrap();
+
+        // Create round 1 packages map (only B and C's packages for A)
+        let mut round1_packages_a = BTreeMap::new();
+        round1_packages_a.insert(identifier_b, package_b.clone());
+        round1_packages_a.insert(identifier_c, package_c.clone());
+
+        let mut round1_packages_b = BTreeMap::new();
+        round1_packages_b.insert(identifier_a, package_a.clone());
+        round1_packages_b.insert(identifier_c, package_c.clone());
+
+        let mut round1_packages_c = BTreeMap::new();
+        round1_packages_c.insert(identifier_a, package_a.clone());
+        round1_packages_c.insert(identifier_b, package_b);
+
+        // Generate round 2 packages for all participants
+        let (round2_secret_package_a, round2_packages_a) =
+            frost::keys::dkg::part2(secret_package_a, &round1_packages_a).unwrap();
+        let (round2_secret_package_b, round2_packages_b) =
+            frost::keys::dkg::part2(secret_package_b, &round1_packages_b).unwrap();
+        let (round2_secret_package_c, round2_packages_c) =
+            frost::keys::dkg::part2(secret_package_c, &round1_packages_c).unwrap();
+
+        // Create a map of all round 2 packages
+        let mut all_round2_packages_a = BTreeMap::new();
+        all_round2_packages_a.insert(identifier_b, round2_packages_b[&identifier_a].clone());
+        all_round2_packages_a.insert(identifier_c, round2_packages_c[&identifier_a].clone());
+
+        // Now generate the final key package
+        frost::keys::dkg::part3(
+            &round2_secret_package_a,
+            &round1_packages_a,
+            &all_round2_packages_a,
+        )
+        .unwrap()
     }
 }
