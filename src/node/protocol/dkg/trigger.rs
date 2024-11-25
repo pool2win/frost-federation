@@ -24,8 +24,9 @@ use crate::node::reliable_sender::ReliableSenderHandle;
 use crate::node::State;
 use crate::node::{echo_broadcast::service::EchoBroadcast, protocol::Message};
 use frost_secp256k1 as frost;
+use frost_secp256k1::keys::{KeyPackage, PublicKeyPackage};
 use tokio::time::{Duration, Instant};
-use tower::ServiceExt;
+use tower::{BoxError, ServiceExt};
 
 /// Runs the DKG trigger loop.
 /// This will trigger the DKG round one protocol at a given interval.
@@ -42,13 +43,18 @@ pub async fn run_dkg_trigger(
         let mut interval = tokio::time::interval_at(start, period);
         interval.tick().await;
 
-        trigger_dkg_round_one(
+        let result = trigger_dkg(
             node_id.clone(),
             state.clone(),
             echo_broadcast_handle.clone(),
             reliable_sender_handle.clone(),
         )
         .await;
+
+        if let Err(e) = result {
+            log::error!("DKG trigger failed with error {:?}", e);
+            return;
+        }
     }
 }
 
@@ -94,12 +100,12 @@ fn build_round2_future(
 
 /// Triggers the DKG round one protocol.
 /// This will return once the round package has been successfully sent to all members.
-pub(crate) async fn trigger_dkg_round_one(
+pub(crate) async fn trigger_dkg(
     node_id: String,
     state: State,
     echo_broadcast_handle: EchoBroadcastHandle,
     reliable_sender_handle: ReliableSenderHandle,
-) {
+) -> Result<(KeyPackage, PublicKeyPackage), BoxError> {
     let protocol_service: Protocol =
         Protocol::new(node_id.clone(), state.clone(), reliable_sender_handle);
 
@@ -117,33 +123,28 @@ pub(crate) async fn trigger_dkg_round_one(
     // TODO Improve this to allow round1 to finish as soon as all other parties have sent their round1 message
     // This will mean moving the timeout into round1 service
 
-    // Wait for round1 to finish, givt it 5 seconds
+    // Wait for round1 to finish, give it 5 seconds
     let (_, round1_result) = tokio::join!(sleep_future, round1_future);
-    if round1_result.is_err() {
-        log::error!("Error running round1 {:?}", round1_result.err());
-        return;
-    }
+    round1_result?;
     log::info!("Round 1 finished");
 
     // start round2
-    let round2_result = round2_future.await;
-    if round2_result.is_err() {
-        log::error!("Error running round2 {:?}", round2_result.err());
-        return;
-    }
+    let _round2_result = round2_future.await?;
     log::info!("Round 2 finished");
 
     // Get packages required to run part3
     match build_key_packages(&state).await {
-        Ok((key_package, pubkey_package)) => {
+        Ok((key_package, public_key_package)) => {
             log::info!(
                 "DKG part3 finished. key_package = {:?}, pubkey_package = {:?}",
                 key_package,
-                pubkey_package
+                public_key_package
             );
+            Ok((key_package, public_key_package))
         }
         Err(e) => {
             log::error!("Error running DKG part3: {:?}", e);
+            Err(e.into())
         }
     }
 }
@@ -153,7 +154,7 @@ pub(crate) async fn trigger_dkg_round_one(
 /// The function returns any error as they are, so they should be handled by the caller.
 async fn build_key_packages(
     state: &State,
-) -> Result<(frost::keys::KeyPackage, frost::keys::PublicKeyPackage), Box<dyn std::error::Error>> {
+) -> Result<(frost::keys::KeyPackage, frost::keys::PublicKeyPackage), BoxError> {
     let round2_secret_package = state
         .dkg_state
         .get_round2_secret_package()
