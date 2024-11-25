@@ -16,13 +16,13 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use crate::node::echo_broadcast::service::EchoBroadcast;
 #[mockall_double::double]
 use crate::node::echo_broadcast::EchoBroadcastHandle;
 use crate::node::protocol::{dkg, Protocol};
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
 use crate::node::State;
+use crate::node::{echo_broadcast::service::EchoBroadcast, protocol::Message};
 use frost_secp256k1 as frost;
 use tokio::time::{Duration, Instant};
 use tower::ServiceExt;
@@ -52,6 +52,46 @@ pub async fn run_dkg_trigger(
     }
 }
 
+/// Build round1 future that the trigger function can use to compose the DKG protocol
+/// This wraps the EchoBroadcast service which further wraps the round_one::Package service.
+fn build_round1_future(
+    node_id: String,
+    protocol_service: Protocol,
+    echo_broadcast_handle: EchoBroadcastHandle,
+    state: State,
+) -> impl std::future::Future<Output = Result<(), tower::BoxError>> {
+    let echo_broadcast_service = EchoBroadcast::new(
+        protocol_service.clone(),
+        echo_broadcast_handle,
+        state,
+        node_id.clone(),
+    );
+
+    // Build round1 service as future
+    log::info!("Sending DKG echo broadcast");
+    let echo_broadcast_timeout_service = tower::ServiceBuilder::new()
+        .timeout(Duration::from_secs(10))
+        .service(echo_broadcast_service);
+
+    echo_broadcast_timeout_service
+        .oneshot(dkg::round_one::PackageMessage::new(node_id, None).into())
+}
+
+/// Build round2 future for use in trigger
+/// This wraps the round_two::Package service into a tower timeout service
+fn build_round2_future(
+    node_id: String,
+    protocol_service: Protocol,
+) -> impl std::future::Future<Output = Result<Option<Message>, tower::BoxError>> {
+    // Build round2 service as future
+    log::info!("Sending DKG round two message");
+    let round_two_timeout_service = tower::ServiceBuilder::new()
+        .timeout(Duration::from_secs(10))
+        .service(protocol_service);
+
+    round_two_timeout_service.oneshot(dkg::round_two::PackageMessage::new(node_id, None).into())
+}
+
 /// Triggers the DKG round one protocol.
 /// This will return once the round package has been successfully sent to all members.
 pub(crate) async fn trigger_dkg_round_one(
@@ -62,30 +102,16 @@ pub(crate) async fn trigger_dkg_round_one(
 ) {
     let protocol_service: Protocol =
         Protocol::new(node_id.clone(), state.clone(), reliable_sender_handle);
-    let echo_broadcast_service = EchoBroadcast::new(
+
+    let round1_future = build_round1_future(
+        node_id.clone(),
         protocol_service.clone(),
         echo_broadcast_handle,
         state.clone(),
-        node_id.clone(),
     );
 
-    log::info!("Sending DKG echo broadcast");
-    let echo_broadcast_timeout_service = tower::ServiceBuilder::new()
-        .timeout(Duration::from_secs(10))
-        .service(echo_broadcast_service);
+    let round2_future = build_round2_future(node_id.clone(), protocol_service.clone());
 
-    let round1_future = echo_broadcast_timeout_service
-        .oneshot(dkg::round_one::PackageMessage::new(node_id.clone(), None).into());
-    // log::info!("DKG Echo broadcast finished");
-
-    log::info!("Sending DKG round two message");
-    let round_two_timeout_service = tower::ServiceBuilder::new()
-        .timeout(Duration::from_secs(10))
-        .service(protocol_service);
-
-    let round2_future = round_two_timeout_service
-        .oneshot(dkg::round_two::PackageMessage::new(node_id, None).into());
-    log::info!("DKG round two message finished");
     let sleep_future = tokio::time::sleep(Duration::from_secs(5));
 
     // TODO Improve this to allow round1 to finish as soon as all other parties have sent their round1 message
@@ -107,35 +133,37 @@ pub(crate) async fn trigger_dkg_round_one(
     }
     log::info!("Round 2 finished");
 
+    // Get packages required to run part3
+    match build_key_packages(&state).await {
+        Ok((key_package, pubkey_package)) => {
+            log::info!(
+                "DKG part3 finished. key_package = {:?}, pubkey_package = {:?}",
+                key_package,
+                pubkey_package
+            );
+        }
+        Err(e) => {
+            log::error!("Error running DKG part3: {:?}", e);
+        }
+    }
+}
+
+/// Build final key packages using frost dkg round3
+/// Get all the required packages from node::state::dkg_state and then build the key package.
+/// The function returns any error as they are, so they should be handled by the caller.
+async fn build_key_packages(
+    state: &State,
+) -> Result<(frost::keys::KeyPackage, frost::keys::PublicKeyPackage), Box<dyn std::error::Error>> {
     let round2_secret_package = state
         .dkg_state
         .get_round2_secret_package()
-        .await
-        .unwrap()
-        .unwrap();
-    let round1_packages = state
-        .dkg_state
-        .get_received_round1_packages()
-        .await
-        .unwrap();
-    let round2_packages = state
-        .dkg_state
-        .get_received_round2_packages()
-        .await
-        .unwrap();
-    let dkg_result =
-        frost::keys::dkg::part3(&round2_secret_package, &round1_packages, &round2_packages);
+        .await?
+        .ok_or("No round2 secret package")?;
+    let round1_packages = state.dkg_state.get_received_round1_packages().await?;
+    let round2_packages = state.dkg_state.get_received_round2_packages().await?;
 
-    if dkg_result.is_err() {
-        log::error!("Error running DKG part3 {:?}", dkg_result.err());
-        return;
-    }
-    let (key_package, pubkey_package) = dkg_result.unwrap();
-    log::info!(
-        "DKG part3 finished. key_package = {:?}, pubkey_package = {:?}",
-        key_package,
-        pubkey_package
-    );
+    frost::keys::dkg::part3(&round2_secret_package, &round1_packages, &round2_packages)
+        .map_err(|e| e.into())
 }
 
 #[cfg(test)]
