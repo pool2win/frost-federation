@@ -121,7 +121,7 @@ mod membership_tests {
         let _ = membership_handle
             .add_member("a".into(), reliable_sender_handle)
             .await;
-        let state = State::new(membership_handle, message_id_generator);
+        let state = State::new(membership_handle, message_id_generator).await;
 
         let mut p = Membership::new("local".to_string(), state);
         let res = p
@@ -147,7 +147,7 @@ mod membership_tests {
     async fn it_should_create_membership_as_service_and_respond_to_membership_with_none() {
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
-        let state = State::new(membership_handle, message_id_generator);
+        let state = State::new(membership_handle, message_id_generator).await;
 
         let mut p = Membership::new("local".to_string(), state);
         let res = p

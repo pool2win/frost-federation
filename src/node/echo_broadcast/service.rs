@@ -142,7 +142,7 @@ mod echo_broadcast_service_tests {
             .add_member("a".to_string(), mock_reliable_sender.clone())
             .await;
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
-        let state = State::new(membership_handle, message_id_generator);
+        let state = State::new(membership_handle, message_id_generator).await;
         let mut echo_bcast_handle = EchoBroadcastHandle::default();
         echo_bcast_handle.expect_clone().returning(|| {
             let mut mocked = EchoBroadcastHandle::default();

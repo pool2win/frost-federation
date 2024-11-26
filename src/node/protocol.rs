@@ -228,7 +228,7 @@ mod protocol_tests {
             .returning(ReliableSenderHandle::default);
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
-        let state = State::new(membership_handle, message_id_generator);
+        let state = State::new(membership_handle, message_id_generator).await;
 
         let p = Protocol::new("local".into(), state, reliable_sender_handle);
         let m = p.oneshot(PingMessage::default().into()).await;

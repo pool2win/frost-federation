@@ -73,7 +73,8 @@ impl Node {
         let state = State::new(
             MembershipHandle::start(bind_address.clone()).await,
             message_id_generator,
-        );
+        )
+        .await;
         Node {
             seeds: vec!["localhost:6680".to_string()],
             bind_address: bind_address.clone(),
@@ -494,7 +495,8 @@ mod node_tests {
         });
 
         let membership_handle = MembershipHandle::start("local".into()).await;
-        let state = super::State::new(membership_handle, MessageIdGenerator::new("local".into()));
+        let state =
+            super::State::new(membership_handle, MessageIdGenerator::new("local".into())).await;
         let res = Node::respond_to_unicast_message(
             "local".into(),
             100,
@@ -525,7 +527,8 @@ mod node_tests {
         });
 
         let membership_handle = MembershipHandle::start("local".into()).await;
-        let state = super::State::new(membership_handle, MessageIdGenerator::new("local".into()));
+        let state =
+            super::State::new(membership_handle, MessageIdGenerator::new("local".into())).await;
         let reliable_sender_handle = ReliableSenderHandle::default();
 
         let res = Node::respond_to_broadcast_message(
