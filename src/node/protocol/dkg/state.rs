@@ -31,6 +31,7 @@ pub(crate) struct State {
     pub round2_secret_package: Option<frost::keys::dkg::round2::SecretPackage>,
     pub key_package: Option<frost::keys::KeyPackage>,
     pub public_key_package: Option<frost::keys::PublicKeyPackage>,
+    pub expected_members: usize,
 }
 
 /// Track state of DKG.
@@ -47,6 +48,7 @@ impl State {
             round2_secret_package: None,
             key_package: None,
             public_key_package: None,
+            expected_members: 0,
         }
     }
 }
@@ -54,7 +56,11 @@ impl State {
 /// Message for state handle to actor communication
 pub(crate) enum StateMessage {
     /// Add a received round1 package to state
-    AddRound1Package(frost::Identifier, dkg::round1::Package, oneshot::Sender<()>),
+    AddRound1Package(
+        frost::Identifier,
+        dkg::round1::Package,
+        oneshot::Sender<bool>,
+    ),
 
     /// Add a received secret package to state
     AddRound1SecretPackage(frost::keys::dkg::round1::SecretPackage, oneshot::Sender<()>),
@@ -158,12 +164,13 @@ impl Actor {
         &mut self,
         identifier: Identifier,
         package: dkg::round1::Package,
-        respond_to: oneshot::Sender<()>,
+        respond_to: oneshot::Sender<bool>,
     ) {
         self.state
             .received_round1_packages
             .insert(identifier, package);
-        let _ = respond_to.send(());
+        let received_count = self.state.received_round1_packages.len();
+        let _ = respond_to.send(received_count == self.state.expected_members);
     }
 
     fn add_secret_package(
@@ -265,7 +272,7 @@ impl StateHandle {
         &self,
         identifier: Identifier,
         package: dkg::round1::Package,
-    ) -> Result<(), oneshot::error::RecvError> {
+    ) -> Result<bool, oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
         let message = StateMessage::AddRound1Package(identifier, package, tx);
         let _ = self.sender.send(message).await;
@@ -426,19 +433,32 @@ mod dkg_state_tests {
         assert_eq!(actor.state.in_progress, false);
     }
 
-    #[test]
-    fn test_actor_add_round1_package() {
+    #[tokio::test]
+    async fn test_actor_add_round1_package() {
         let (_tx, rx) = mpsc::channel(1);
         let mut actor = Actor::new(rx);
-        let identifier = frost::Identifier::derive(b"1").unwrap();
+        actor.state.expected_members = 2; // Set expected members
+        let identifier1 = frost::Identifier::derive(b"1").unwrap();
+        let identifier2 = frost::Identifier::derive(b"2").unwrap();
         let rng = thread_rng();
 
-        let (_secret_package, package) =
-            frost::keys::dkg::part1(identifier, 3 as u16, 2 as u16, rng).unwrap();
+        // Create first package
+        let (_secret_package1, package1) =
+            frost::keys::dkg::part1(identifier1, 3 as u16, 2 as u16, rng.clone()).unwrap();
 
-        let (tx1, _rx1) = oneshot::channel();
-        actor.add_round1_package(identifier, package, tx1);
+        // Add first package - should return false as we don't have all packages yet
+        let (tx1, rx1) = oneshot::channel();
+        actor.add_round1_package(identifier1, package1, tx1);
+        assert_eq!(rx1.await.unwrap(), false);
         assert_eq!(actor.state.received_round1_packages.len(), 1);
+
+        // Create and add second package - should return true as we now have all packages
+        let (_secret_package2, package2) =
+            frost::keys::dkg::part1(identifier2, 3 as u16, 2 as u16, rng).unwrap();
+        let (tx2, rx2) = oneshot::channel();
+        actor.add_round1_package(identifier2, package2, tx2);
+        assert_eq!(rx2.await.unwrap(), true);
+        assert_eq!(actor.state.received_round1_packages.len(), 2);
     }
 
     #[test]
@@ -561,17 +581,34 @@ mod dkg_state_handle_tests {
     #[tokio::test]
     async fn test_state_handle_add_round1_package() {
         let state_handle = StateHandle::new();
-        let identifier = frost::Identifier::derive(b"1").unwrap();
-        let (_secret_package, package) =
-            frost::keys::dkg::part1(identifier, 3, 2, thread_rng()).unwrap();
 
-        // Send the package and assert success
-        assert!(state_handle
-            .add_round1_package(identifier, package.clone())
+        // Set up identifiers and packages
+        let identifier1 = frost::Identifier::derive(b"1").unwrap();
+        let identifier2 = frost::Identifier::derive(b"2").unwrap();
+        let (_secret_package1, package1) =
+            frost::keys::dkg::part1(identifier1, 3, 2, thread_rng()).unwrap();
+        let (_secret_package2, package2) =
+            frost::keys::dkg::part1(identifier2, 3, 2, thread_rng()).unwrap();
+
+        // First package should return false (not all packages received)
+        let result = state_handle
+            .add_round1_package(identifier1, package1)
             .await
-            .is_ok());
-        let received_round1_packages = state_handle.get_received_round1_packages().await.unwrap();
-        assert_eq!(received_round1_packages.len(), 1);
+            .unwrap();
+        assert_eq!(result, false);
+
+        let received_packages = state_handle.get_received_round1_packages().await.unwrap();
+        assert_eq!(received_packages.len(), 1);
+
+        // Second package should return true (all packages received)
+        let result = state_handle
+            .add_round1_package(identifier2, package2)
+            .await
+            .unwrap();
+        assert_eq!(result, true);
+
+        let received_packages = state_handle.get_received_round1_packages().await.unwrap();
+        assert_eq!(received_packages.len(), 2);
     }
 
     #[tokio::test]
