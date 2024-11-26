@@ -361,7 +361,7 @@ impl Node {
     ) {
         tokio::spawn(async move {
             let protocol_service =
-                Protocol::new(node_id.clone(), state, reliable_sender_handle.clone());
+                Protocol::new(node_id.clone(), state, Some(reliable_sender_handle.clone()));
             let reliable_sender_service =
                 ReliableSend::new(protocol_service, reliable_sender_handle);
             let timeout_layer =
@@ -390,7 +390,7 @@ impl Node {
             let protocol_service = Protocol::new(
                 node_id.clone(),
                 state.clone(),
-                reliable_sender_handle.clone(),
+                Some(reliable_sender_handle.clone()),
             );
             let echo_broadcast_service =
                 EchoBroadcast::new(protocol_service, echo_broadcast_handle, state, node_id);
