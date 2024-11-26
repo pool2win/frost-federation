@@ -152,11 +152,11 @@ impl From<BroadcastProtocol> for Message {
 pub struct Protocol {
     node_id: String,
     state: State,
-    peer_sender: ReliableSenderHandle,
+    peer_sender: Option<ReliableSenderHandle>,
 }
 
 impl Protocol {
-    pub fn new(node_id: String, state: State, peer_sender: ReliableSenderHandle) -> Self {
+    pub fn new(node_id: String, state: State, peer_sender: Option<ReliableSenderHandle>) -> Self {
         Protocol {
             node_id,
             state,
@@ -230,7 +230,7 @@ mod protocol_tests {
         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
         let state = State::new(membership_handle, message_id_generator).await;
 
-        let p = Protocol::new("local".into(), state, reliable_sender_handle);
+        let p = Protocol::new("local".into(), state, Some(reliable_sender_handle));
         let m = p.oneshot(PingMessage::default().into()).await;
         assert!(m.unwrap().is_some());
     }

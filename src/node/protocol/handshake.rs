@@ -47,11 +47,11 @@ impl HandshakeMessage {
 pub struct Handshake {
     node_id: String,
     state: State,
-    peer_sender: ReliableSenderHandle,
+    peer_sender: Option<ReliableSenderHandle>,
 }
 
 impl Handshake {
-    pub fn new(node_id: String, state: State, peer_sender: ReliableSenderHandle) -> Self {
+    pub fn new(node_id: String, state: State, peer_sender: Option<ReliableSenderHandle>) -> Self {
         Handshake {
             node_id,
             state,
@@ -86,7 +86,7 @@ impl Service<Message> for Handshake {
                 })) => match message.as_str() {
                     "helo" => {
                         if membership_handle
-                            .add_member(sender_id, peer_sender)
+                            .add_member(sender_id, peer_sender.unwrap())
                             .await
                             .is_err()
                         {
@@ -102,7 +102,7 @@ impl Service<Message> for Handshake {
                     }
                     "oleh" => {
                         if membership_handle
-                            .add_member(sender_id, peer_sender)
+                            .add_member(sender_id, peer_sender.unwrap())
                             .await
                             .is_err()
                         {
@@ -154,7 +154,7 @@ mod handshake_tests {
             .expect_clone()
             .returning(ReliableSenderHandle::default);
 
-        let mut p = Handshake::new("local".to_string(), state, reliable_sender_handle);
+        let mut p = Handshake::new("local".to_string(), state, Some(reliable_sender_handle));
 
         let res = p
             .ready()
@@ -185,7 +185,7 @@ mod handshake_tests {
             .expect_clone()
             .returning(ReliableSenderHandle::default);
 
-        let mut p = Handshake::new("local".to_string(), state, reliable_sender_handle);
+        let mut p = Handshake::new("local".to_string(), state, Some(reliable_sender_handle));
 
         let res = p
             .ready()
@@ -224,7 +224,7 @@ mod handshake_tests {
             mock
         });
 
-        let mut p = Handshake::new("local".to_string(), state, reliable_sender_handle);
+        let mut p = Handshake::new("local".to_string(), state, Some(reliable_sender_handle));
 
         let res = p
             .ready()

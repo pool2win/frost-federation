@@ -112,7 +112,7 @@ pub(crate) async fn trigger_dkg(
     reliable_sender_handle: ReliableSenderHandle,
 ) -> Result<(KeyPackage, PublicKeyPackage), BoxError> {
     let protocol_service: Protocol =
-        Protocol::new(node_id.clone(), state.clone(), reliable_sender_handle);
+        Protocol::new(node_id.clone(), state.clone(), Some(reliable_sender_handle));
 
     let round1_future = build_round1_future(
         node_id.clone(),

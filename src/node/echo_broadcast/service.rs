@@ -155,8 +155,11 @@ mod echo_broadcast_service_tests {
         }
         .into();
 
-        let handshake_service =
-            Protocol::new("localhost".to_string(), state.clone(), mock_reliable_sender);
+        let handshake_service = Protocol::new(
+            "localhost".to_string(),
+            state.clone(),
+            Some(mock_reliable_sender),
+        );
         let echo_broadcast_service = EchoBroadcast::new(
             handshake_service,
             echo_bcast_handle,
