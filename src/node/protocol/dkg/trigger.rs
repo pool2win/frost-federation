@@ -28,6 +28,9 @@ use frost_secp256k1::keys::{KeyPackage, PublicKeyPackage};
 use tokio::time::{Duration, Instant};
 use tower::{BoxError, ServiceExt};
 
+/// Timeout in seconds, for DKG rounds one and two.
+const DKG_ROUND_TIMEOUT: u64 = 10;
+
 /// Runs the DKG trigger loop.
 /// This will trigger the DKG round one protocol at a given interval.
 pub async fn run_dkg_trigger(
@@ -76,7 +79,7 @@ fn build_round1_future(
     // Build round1 service as future
     log::info!("Sending DKG echo broadcast");
     let echo_broadcast_timeout_service = tower::ServiceBuilder::new()
-        .timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(DKG_ROUND_TIMEOUT))
         .service(echo_broadcast_service);
 
     echo_broadcast_timeout_service
@@ -92,7 +95,7 @@ fn build_round2_future(
     // Build round2 service as future
     log::info!("Sending DKG round two message");
     let round_two_timeout_service = tower::ServiceBuilder::new()
-        .timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(DKG_ROUND_TIMEOUT))
         .service(protocol_service);
 
     round_two_timeout_service.oneshot(dkg::round_two::PackageMessage::new(node_id, None).into())
