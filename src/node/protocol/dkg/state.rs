@@ -25,7 +25,6 @@ pub(crate) type Round1Map = BTreeMap<frost::Identifier, dkg::round1::Package>;
 pub(crate) type Round2Map = BTreeMap<frost::Identifier, frost::keys::dkg::round2::Package>;
 pub(crate) struct State {
     pub in_progress: bool,
-    pub pub_key: Option<frost::keys::PublicKeyPackage>,
     pub received_round1_packages: Round1Map,
     pub received_round2_packages: Round2Map,
     pub round1_secret_package: Option<frost::keys::dkg::round1::SecretPackage>,
@@ -42,7 +41,6 @@ impl State {
     pub fn new() -> Self {
         Self {
             in_progress: false,
-            pub_key: None,
             received_round1_packages: Round1Map::new(),
             received_round2_packages: Round2Map::new(),
             round1_secret_package: None,
@@ -398,7 +396,6 @@ mod dkg_state_tests {
     #[mockall_double::double]
     use crate::node::reliable_sender::ReliableSenderHandle;
     use crate::node::{test_helpers::support::build_round2_state, MembershipHandle};
-    use frost_secp256k1::keys::KeyPackage;
     use futures::FutureExt;
     use rand::thread_rng;
     use std::collections::BTreeMap;
@@ -408,10 +405,11 @@ mod dkg_state_tests {
     fn test_state_new() {
         let state = State::new();
         assert_eq!(state.in_progress, false);
-        assert_eq!(state.pub_key, None);
         assert_eq!(state.received_round1_packages, BTreeMap::new());
         assert_eq!(state.round1_secret_package, None);
         assert_eq!(state.round2_secret_package, None);
+        assert_eq!(state.key_package, None);
+        assert_eq!(state.public_key_package, None);
     }
 
     #[test]
