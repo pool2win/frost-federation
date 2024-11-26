@@ -148,7 +148,7 @@ mod handshake_tests {
     #[tokio::test]
     async fn it_should_create_handshake_as_service_and_respond_to_default_message_with_handshake() {
         let membership_handle = MembershipHandle::start("local".into()).await;
-        let state = State::new(membership_handle, MessageIdGenerator::new("local".into()));
+        let state = State::new(membership_handle, MessageIdGenerator::new("local".into())).await;
         let mut reliable_sender_handle = ReliableSenderHandle::default();
         reliable_sender_handle
             .expect_clone()
@@ -179,7 +179,7 @@ mod handshake_tests {
     #[tokio::test]
     async fn it_should_create_handshake_as_service_and_respond_to_helo_with_oleh() {
         let membership_handle = MembershipHandle::start("local".into()).await;
-        let state = State::new(membership_handle, MessageIdGenerator::new("local".into()));
+        let state = State::new(membership_handle, MessageIdGenerator::new("local".into())).await;
         let mut reliable_sender_handle = ReliableSenderHandle::default();
         reliable_sender_handle
             .expect_clone()
@@ -216,7 +216,7 @@ mod handshake_tests {
     #[tokio::test]
     async fn it_should_create_handshake_as_service_and_respond_to_oleh_with_none() {
         let membership_handle = MembershipHandle::start("local".into()).await;
-        let state = State::new(membership_handle, MessageIdGenerator::new("local".into()));
+        let state = State::new(membership_handle, MessageIdGenerator::new("local".into())).await;
         let mut reliable_sender_handle = ReliableSenderHandle::default();
         reliable_sender_handle.expect_clone().returning(|| {
             let mut mock = ReliableSenderHandle::default();

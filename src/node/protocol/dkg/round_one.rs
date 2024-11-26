@@ -173,7 +173,7 @@ mod round_one_package_tests {
     ) {
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
         let membership_handle = build_membership(3).await;
-        let state = State::new(membership_handle, message_id_generator);
+        let state = State::new(membership_handle, message_id_generator).await;
 
         let mut pkg = Package::new("local".into(), state);
         let res = pkg
@@ -197,7 +197,7 @@ mod round_one_package_tests {
     async fn it_should_serialize_and_deserialize_round_one_public_key_package() {
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
         let membership_handle = build_membership(3).await;
-        let state = State::new(membership_handle, message_id_generator);
+        let state = State::new(membership_handle, message_id_generator).await;
 
         let round1_package = build_round1_package("local".into(), state).await.unwrap();
 
@@ -220,7 +220,7 @@ mod round_one_package_tests {
     async fn it_should_store_received_round_one_package_in_state() {
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
         let membership_handle = build_membership(3).await;
-        let state = State::new(membership_handle, message_id_generator);
+        let state = State::new(membership_handle, message_id_generator).await;
         let state_clone = state.clone();
 
         // First create a round1 package that we'll pretend came from another node

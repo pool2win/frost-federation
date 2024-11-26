@@ -39,7 +39,7 @@ pub(crate) struct State {
 /// We also store the latest key generated here - which is not cleared out till the next key is finalised
 /// Question - should we track the membership of senders engaged in this DKG too?
 impl State {
-    pub fn new() -> Self {
+    pub fn new(expected_members: usize) -> Self {
         Self {
             in_progress: false,
             received_round1_packages: Round1Map::new(),
@@ -48,7 +48,7 @@ impl State {
             round2_secret_package: None,
             key_package: None,
             public_key_package: None,
-            expected_members: 0,
+            expected_members,
         }
     }
 }
@@ -84,7 +84,7 @@ pub(crate) enum StateMessage {
     AddRound2Package(
         frost::Identifier,
         frost::keys::dkg::round2::Package,
-        oneshot::Sender<()>,
+        oneshot::Sender<bool>,
     ),
 
     /// Set the key package
@@ -106,9 +106,9 @@ pub(crate) struct Actor {
 }
 
 impl Actor {
-    fn new(receiver: mpsc::Receiver<StateMessage>) -> Self {
+    fn new(receiver: mpsc::Receiver<StateMessage>, expected_members: usize) -> Self {
         Self {
-            state: State::new(),
+            state: State::new(expected_members),
             receiver,
         }
     }
@@ -203,12 +203,13 @@ impl Actor {
         &mut self,
         identifier: Identifier,
         package: frost::keys::dkg::round2::Package,
-        respond_to: oneshot::Sender<()>,
+        respond_to: oneshot::Sender<bool>,
     ) {
         self.state
             .received_round2_packages
             .insert(identifier, package);
-        let _ = respond_to.send(());
+        let received_count = self.state.received_round2_packages.len();
+        let _ = respond_to.send(received_count == self.state.expected_members);
     }
 
     fn get_received_round2_packages(&self, respond_to: oneshot::Sender<Round2Map>) {
@@ -251,20 +252,25 @@ impl Actor {
 #[derive(Clone, Debug)]
 pub(crate) struct StateHandle {
     sender: mpsc::Sender<StateMessage>,
+    pub(crate) expected_members: Option<usize>,
 }
 
 impl StateHandle {
     /// Create a new state handle and spawn the actor
-    pub fn new() -> Self {
+    pub fn new(expected_members: Option<usize>) -> Self {
         let (sender, receiver) = mpsc::channel(1);
-        let mut actor = Actor::new(receiver);
+        // default expected members = 1, as we count ourselves
+        let mut actor = Actor::new(receiver, expected_members.unwrap_or(1));
 
         // Spawn the actor task
         tokio::spawn(async move {
             actor.run().await;
         });
 
-        Self { sender }
+        Self {
+            sender,
+            expected_members,
+        }
     }
 
     /// Add round1 package to state
@@ -346,7 +352,7 @@ impl StateHandle {
         &self,
         identifier: Identifier,
         package: frost::keys::dkg::round2::Package,
-    ) -> Result<(), oneshot::error::RecvError> {
+    ) -> Result<bool, oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
         let message = StateMessage::AddRound2Package(identifier, package, tx);
         let _ = self.sender.send(message).await;
@@ -410,7 +416,7 @@ mod dkg_state_tests {
 
     #[test]
     fn test_state_new() {
-        let state = State::new();
+        let state = State::new(0);
         assert_eq!(state.in_progress, false);
         assert_eq!(state.received_round1_packages, BTreeMap::new());
         assert_eq!(state.round1_secret_package, None);
@@ -422,22 +428,21 @@ mod dkg_state_tests {
     #[test]
     fn test_actor_start() {
         let (tx, rx) = mpsc::channel(1);
-        let mut actor = Actor::new(rx);
+        let mut actor = Actor::new(rx, 0);
         assert_eq!(actor.state.in_progress, false);
     }
 
     #[tokio::test]
     async fn test_actor_start_new_dkg() {
         let (tx, rx) = mpsc::channel(1);
-        let mut actor = Actor::new(rx);
+        let mut actor = Actor::new(rx, 0);
         assert_eq!(actor.state.in_progress, false);
     }
 
     #[tokio::test]
     async fn test_actor_add_round1_package() {
         let (_tx, rx) = mpsc::channel(1);
-        let mut actor = Actor::new(rx);
-        actor.state.expected_members = 2; // Set expected members
+        let mut actor = Actor::new(rx, 2);
         let identifier1 = frost::Identifier::derive(b"1").unwrap();
         let identifier2 = frost::Identifier::derive(b"2").unwrap();
         let rng = thread_rng();
@@ -464,7 +469,7 @@ mod dkg_state_tests {
     #[test]
     fn test_actor_add_secret_package() {
         let (_tx, rx) = mpsc::channel(1);
-        let mut actor = Actor::new(rx);
+        let mut actor = Actor::new(rx, 3);
         let identifier = frost::Identifier::derive(b"1").unwrap();
         let rng = thread_rng();
 
@@ -479,7 +484,7 @@ mod dkg_state_tests {
     #[tokio::test]
     async fn test_actor_add_round2_package() {
         let (_tx, rx) = mpsc::channel(1);
-        let mut actor = Actor::new(rx);
+        let mut actor = Actor::new(rx, 2);
 
         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
         for i in 1..3 {
@@ -499,7 +504,8 @@ mod dkg_state_tests {
         let state = crate::node::state::State::new(
             membership_handle,
             MessageIdGenerator::new("local".to_string()),
-        );
+        )
+        .await;
         let (state, round1_packages) = build_round2_state(state).await;
 
         // Generate round2 packages
@@ -514,24 +520,26 @@ mod dkg_state_tests {
         )
         .unwrap();
 
-        // Add each round2 package to state
-        for (identifier, round2_package) in round2_packages.iter() {
-            let (tx, _rx) = oneshot::channel();
-            actor.add_round2_package(*identifier, round2_package.clone(), tx);
-        }
+        // Convert round2_packages into a vector for testing
+        let packages: Vec<_> = round2_packages.into_iter().collect();
 
+        // Add first package - should return false as we don't have all packages yet
+        let (tx1, rx1) = oneshot::channel();
+        actor.add_round2_package(packages[0].0, packages[0].1.clone(), tx1);
+        assert_eq!(rx1.await.unwrap(), false);
+        assert_eq!(actor.state.received_round2_packages.len(), 1);
+
+        // Add second package - should return true as we now have all packages
+        let (tx2, rx2) = oneshot::channel();
+        actor.add_round2_package(packages[1].0, packages[1].1.clone(), tx2);
+        assert_eq!(rx2.await.unwrap(), true);
         assert_eq!(actor.state.received_round2_packages.len(), 2);
-
-        let (tx, rx) = oneshot::channel();
-        actor.get_received_round2_packages(tx);
-        let received_packages = rx.await.unwrap();
-        assert_eq!(received_packages.len(), 2);
     }
 
     #[tokio::test]
     async fn test_actor_set_get_key_package() {
         let (_tx, rx) = mpsc::channel(1);
-        let mut actor = Actor::new(rx);
+        let mut actor = Actor::new(rx, 3);
 
         // Get test packages
         let (key_package, public_key_package) =
@@ -574,13 +582,13 @@ mod dkg_state_handle_tests {
 
     #[tokio::test]
     async fn test_state_handle_new() {
-        let handle = StateHandle::new();
+        let handle = StateHandle::new(Some(0));
         assert!(handle.sender.capacity() > 0);
     }
 
     #[tokio::test]
     async fn test_state_handle_add_round1_package() {
-        let state_handle = StateHandle::new();
+        let state_handle = StateHandle::new(Some(2));
 
         // Set up identifiers and packages
         let identifier1 = frost::Identifier::derive(b"1").unwrap();
@@ -613,7 +621,7 @@ mod dkg_state_handle_tests {
 
     #[tokio::test]
     async fn test_state_handle_add_secret_package() {
-        let state_handle = StateHandle::new();
+        let state_handle = StateHandle::new(Some(0));
 
         let identifier = frost::Identifier::derive(b"1").unwrap();
         let (secret_package, _package) =
@@ -638,7 +646,8 @@ mod dkg_state_handle_tests {
         let state = node::state::State::new(
             membership_handle,
             MessageIdGenerator::new("local".to_string()),
-        );
+        )
+        .await;
 
         let rng = thread_rng();
         let mut round1_packages = Round1Map::new();
@@ -719,7 +728,7 @@ mod dkg_state_handle_tests {
 
     #[tokio::test]
     async fn test_state_handle_set_get_key_package() {
-        let state_handle = StateHandle::new();
+        let state_handle = StateHandle::new(Some(0));
 
         // Get test packages
         let (key_package, public_key_package) =
@@ -738,7 +747,7 @@ mod dkg_state_handle_tests {
 
     #[tokio::test]
     async fn test_state_handle_set_get_public_key_package() {
-        let state_handle = StateHandle::new();
+        let state_handle = StateHandle::new(Some(0));
 
         // Get test packages
         let (key_package, public_key_package) =
@@ -753,5 +762,102 @@ mod dkg_state_handle_tests {
         // Test getting
         let retrieved_package = state_handle.get_public_key_package().await.unwrap();
         assert_eq!(retrieved_package, Some(public_key_package));
+    }
+
+    #[tokio::test]
+    async fn test_state_handle_add_round2_package() {
+        let state_handle = StateHandle::new(Some(2));
+
+        let membership_handle = build_membership(3).await;
+        let state = node::state::State::new(
+            membership_handle,
+            MessageIdGenerator::new("local".to_string()),
+        )
+        .await;
+
+        let rng = thread_rng();
+        let mut round1_packages = Round1Map::new();
+
+        // generate our round1 secret and package
+        let (secret_package, _round1_package) = frost::keys::dkg::part1(
+            frost::Identifier::derive(b"node1").unwrap(),
+            3,
+            2,
+            rng.clone(),
+        )
+        .unwrap();
+        log::debug!("Secret package {:?}", secret_package);
+
+        // add our secret package to state
+        state
+            .dkg_state
+            .add_round1_secret_package(secret_package)
+            .await
+            .unwrap();
+
+        // Add packages for other nodes
+        let (_, round1_package2) = frost::keys::dkg::part1(
+            frost::Identifier::derive(b"node2").unwrap(),
+            3,
+            2,
+            rng.clone(),
+        )
+        .unwrap();
+        round1_packages.insert(
+            frost::Identifier::derive(b"node2").unwrap(),
+            round1_package2,
+        );
+
+        let (_, round1_package3) = frost::keys::dkg::part1(
+            frost::Identifier::derive(b"node3").unwrap(),
+            3,
+            2,
+            rng.clone(),
+        )
+        .unwrap();
+        round1_packages.insert(
+            frost::Identifier::derive(b"node3").unwrap(),
+            round1_package3,
+        );
+
+        // add all round1 packages to state
+        for (id, package) in round1_packages {
+            state
+                .dkg_state
+                .add_round1_package(id, package)
+                .await
+                .unwrap();
+        }
+
+        let (round2_secret_package, round2_packages) =
+            crate::node::protocol::dkg::round_two::build_round2_packages(
+                "node1".to_string(),
+                state.clone(),
+            )
+            .await
+            .unwrap();
+
+        // Convert round2_packages into a vector for testing
+        let packages: Vec<_> = round2_packages.into_iter().collect();
+
+        // First package should return false (not all packages received)
+        let result = state_handle
+            .add_round2_package(packages[0].0, packages[0].1.clone())
+            .await
+            .unwrap();
+        assert_eq!(result, false);
+
+        let received_packages = state_handle.get_received_round2_packages().await.unwrap();
+        assert_eq!(received_packages.len(), 1);
+
+        // Second package should return true (all packages received)
+        let result = state_handle
+            .add_round2_package(packages[1].0, packages[1].1.clone())
+            .await
+            .unwrap();
+        assert_eq!(result, true);
+
+        let received_packages = state_handle.get_received_round2_packages().await.unwrap();
+        assert_eq!(received_packages.len(), 2);
     }
 }

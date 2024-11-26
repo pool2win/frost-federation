@@ -36,7 +36,7 @@ const DKG_ROUND_TIMEOUT: u64 = 10;
 pub async fn run_dkg_trigger(
     duration_millis: u64,
     node_id: String,
-    state: State,
+    mut state: State,
     echo_broadcast_handle: EchoBroadcastHandle,
     reliable_sender_handle: ReliableSenderHandle,
 ) {
@@ -45,6 +45,8 @@ pub async fn run_dkg_trigger(
         let start = Instant::now() + period;
         let mut interval = tokio::time::interval_at(start, period);
         interval.tick().await;
+
+        state.start_new_dkg().await;
 
         let result = trigger_dkg(
             node_id.clone(),
@@ -128,7 +130,10 @@ pub(crate) async fn trigger_dkg(
 
     // Wait for round1 to finish, give it 5 seconds
     let (_, round1_result) = tokio::join!(sleep_future, round1_future);
-    round1_result?;
+    if round1_result.is_err() {
+        log::error!("Error running round 1");
+        round1_result?
+    }
     log::info!("Round 1 finished");
 
     // start round2
@@ -189,7 +194,7 @@ mod dkg_trigger_tests {
         let node_id = "test-node".to_string();
         let membership_handle = MembershipHandle::start("local".into()).await;
 
-        let state = State::new(membership_handle, MessageIdGenerator::new("local".into()));
+        let state = State::new(membership_handle, MessageIdGenerator::new("local".into())).await;
         let mut mock_echo_broadcast_handle = EchoBroadcastHandle::default();
         mock_echo_broadcast_handle.expect_clone().returning(|| {
             let mut mock = EchoBroadcastHandle::default();

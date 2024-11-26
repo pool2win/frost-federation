@@ -229,7 +229,8 @@ mod round_two_tests {
         let state = node::state::State::new(
             membership_handle,
             MessageIdGenerator::new("local".to_string()),
-        );
+        )
+        .await;
         let result = build_round2_packages("localhost".to_string(), state)
             .await
             .unwrap_err();
@@ -253,7 +254,8 @@ mod round_two_tests {
         let state = node::state::State::new(
             membership_handle,
             MessageIdGenerator::new("local".to_string()),
-        );
+        )
+        .await;
         let (state, round1_packages) = build_round2_state(state).await;
 
         // add all round1 packages to state
@@ -292,7 +294,8 @@ mod round_two_tests {
         let state = node::state::State::new(
             membership_handle,
             MessageIdGenerator::new("local".to_string()),
-        );
+        )
+        .await;
         let (state, round1_packages) = build_round2_state(state).await;
 
         // add all round1 packages to state
@@ -321,11 +324,6 @@ mod round_two_tests {
 
         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
 
-        let state = node::state::State::new(
-            membership_handle.clone(),
-            MessageIdGenerator::new("local".to_string()),
-        );
-
         let mut mock_reliable_sender = ReliableSenderHandle::default();
         mock_reliable_sender.expect_clone().returning(|| {
             let mut mock = ReliableSenderHandle::default();
@@ -338,6 +336,12 @@ mod round_two_tests {
         let _ = membership_handle
             .add_member("localhost1".to_string(), mock_reliable_sender)
             .await;
+
+        let state = node::state::State::new(
+            membership_handle.clone(),
+            MessageIdGenerator::new("local".to_string()),
+        )
+        .await;
 
         // Make one of the reliable senders return an error
         let mut mock_reliable_sender = ReliableSenderHandle::default();
@@ -383,11 +387,6 @@ mod round_two_tests {
 
         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
 
-        let state = node::state::State::new(
-            membership_handle.clone(),
-            MessageIdGenerator::new("localhost".to_string()),
-        );
-
         for i in 1..3 {
             let mut mock_reliable_sender = ReliableSenderHandle::default();
             mock_reliable_sender.expect_clone().returning(|| {
@@ -402,6 +401,12 @@ mod round_two_tests {
                 .add_member(format!("localhost{}", i), mock_reliable_sender)
                 .await;
         }
+
+        let state = node::state::State::new(
+            membership_handle.clone(),
+            MessageIdGenerator::new("localhost".to_string()),
+        )
+        .await;
 
         let (mut state, round1_packages) = build_round2_state(state).await;
 
