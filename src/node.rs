@@ -281,7 +281,7 @@ impl Node {
         Ok(())
     }
 
-    pub async fn start_reliable_sender_receiver(
+    async fn start_reliable_sender_receiver(
         &self,
         connection_handle: ConnectionHandle,
         connection_receiver: mpsc::Receiver<ReliableNetworkMessage>,
@@ -291,7 +291,7 @@ impl Node {
         (reliable_sender_handle, client_receiver)
     }
 
-    pub async fn start_connection_event_loop(
+    async fn start_connection_event_loop(
         &self,
         peer_addr: String,
         reliable_sender_handle: ReliableSenderHandle,
