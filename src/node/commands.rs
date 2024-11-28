@@ -84,7 +84,12 @@ mod command_tests {
     #[tokio::test]
     async fn it_should_run_node_with_command_rx() {
         let ctx = EchoBroadcastHandle::start_context();
-        ctx.expect().returning(EchoBroadcastHandle::default);
+        ctx.expect().returning(|| {
+            let mut mock = EchoBroadcastHandle::default();
+            mock.expect_clone()
+                .returning(|| EchoBroadcastHandle::default());
+            mock
+        });
 
         let (exector, command_rx) = CommandExecutor::new();
         let mut node = Node::new()

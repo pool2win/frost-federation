@@ -32,34 +32,34 @@ use tower::{BoxError, ServiceExt};
 const DKG_ROUND_TIMEOUT: u64 = 10;
 
 /// Runs the DKG trigger loop.
-/// This will trigger the DKG round one protocol at a given interval.
+/// This will trigger the DKG round one protocol after an initial wait.
 pub async fn run_dkg_trigger(
     duration_millis: u64,
     node_id: String,
     mut state: State,
     echo_broadcast_handle: EchoBroadcastHandle,
-    reliable_sender_handle: ReliableSenderHandle,
+    reliable_sender_handle: Option<ReliableSenderHandle>,
 ) {
     let period = Duration::from_millis(duration_millis);
-    loop {
-        let start = Instant::now() + period;
-        let mut interval = tokio::time::interval_at(start, period);
-        interval.tick().await;
+    let start = Instant::now() + period;
+    let mut interval = tokio::time::interval_at(start, period);
+    interval.tick().await; // Using tick here so we can later run this in a loop
 
-        state.start_new_dkg().await;
+    state.update_expected_members().await;
 
-        let result = trigger_dkg(
-            node_id.clone(),
-            state.clone(),
-            echo_broadcast_handle.clone(),
-            reliable_sender_handle.clone(),
-        )
-        .await;
+    let result = trigger_dkg(
+        node_id.clone(),
+        state.clone(),
+        echo_broadcast_handle.clone(),
+        reliable_sender_handle.clone(),
+    )
+    .await;
 
-        if let Err(e) = result {
-            log::error!("DKG trigger failed with error {:?}", e);
-            return;
-        }
+    if let Err(e) = result {
+        log::error!("DKG trigger failed with error {:?}", e);
+        return;
+    } else {
+        log::info!("DKG trigger finished");
     }
 }
 
@@ -95,7 +95,6 @@ fn build_round2_future(
     protocol_service: Protocol,
 ) -> impl std::future::Future<Output = Result<Option<Message>, tower::BoxError>> {
     // Build round2 service as future
-    log::info!("Sending DKG round two message");
     let round_two_timeout_service = tower::ServiceBuilder::new()
         .timeout(Duration::from_secs(DKG_ROUND_TIMEOUT))
         .service(protocol_service);
@@ -109,10 +108,10 @@ pub(crate) async fn trigger_dkg(
     node_id: String,
     state: State,
     echo_broadcast_handle: EchoBroadcastHandle,
-    reliable_sender_handle: ReliableSenderHandle,
-) -> Result<(KeyPackage, PublicKeyPackage), BoxError> {
+    reliable_sender_handle: Option<ReliableSenderHandle>,
+) -> Result<(), BoxError> {
     let protocol_service: Protocol =
-        Protocol::new(node_id.clone(), state.clone(), Some(reliable_sender_handle));
+        Protocol::new(node_id.clone(), state.clone(), reliable_sender_handle);
 
     let round1_future = build_round1_future(
         node_id.clone(),
@@ -136,8 +135,21 @@ pub(crate) async fn trigger_dkg(
     }
     log::info!("Round 1 finished");
 
+    log::debug!(
+        "received round1 packages = {:?}",
+        state
+            .dkg_state
+            .get_received_round1_packages()
+            .await
+            .unwrap()
+    );
+
+    let sleep_future = tokio::time::sleep(Duration::from_secs(5));
     // start round2
-    let _round2_result = round2_future.await?;
+    let (_, round2_result) = tokio::join!(sleep_future, round2_future);
+    if round2_result.is_err() {
+        log::error!("Error running round 2");
+    }
     log::info!("Round 2 finished");
 
     // Get packages required to run part3
@@ -148,7 +160,12 @@ pub(crate) async fn trigger_dkg(
                 key_package,
                 public_key_package
             );
-            Ok((key_package, public_key_package))
+            state.dkg_state.set_key_package(key_package).await?;
+            state
+                .dkg_state
+                .set_public_key_package(public_key_package)
+                .await?;
+            Ok(())
         }
         Err(e) => {
             log::error!("Error running DKG part3: {:?}", e);
@@ -170,6 +187,12 @@ async fn build_key_packages(
         .ok_or("No round2 secret package")?;
     let round1_packages = state.dkg_state.get_received_round1_packages().await?;
     let round2_packages = state.dkg_state.get_received_round2_packages().await?;
+
+    log::debug!(
+        "round1_packages = {:?}, round2_packages = {:?}",
+        round1_packages.len(),
+        round2_packages.len()
+    );
 
     frost::keys::dkg::part3(&round2_secret_package, &round1_packages, &round2_packages)
         .map_err(|e| e.into())
@@ -231,7 +254,7 @@ mod dkg_trigger_tests {
                 node_id,
                 state,
                 mock_echo_broadcast_handle,
-                mock_reliable_sender_handle,
+                Some(mock_reliable_sender_handle),
             ),
         )
         .await;
