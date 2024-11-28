@@ -140,11 +140,15 @@ impl Service<Message> for Package {
                         message
                     );
                     let identifier = frost::Identifier::derive(from_sender_id.as_bytes()).unwrap();
-                    state
+                    let finished = state
                         .dkg_state
                         .add_round1_package(identifier, message)
                         .await
                         .unwrap();
+                    if finished {
+                        log::debug!("Round one finished, sending signal");
+                        let _ = state.round_tx.unwrap().send(()).await;
+                    }
                     Ok(None)
                 }
                 _ => {

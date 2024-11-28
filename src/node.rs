@@ -126,10 +126,19 @@ impl Node {
         log::debug!("Starting... {}", self.bind_address);
         let node_id = self.get_node_id().clone();
         let state = self.state.clone();
+        let (round_tx, round_rx) = mpsc::channel::<()>(1);
+        self.state.round_tx = Some(round_tx.clone());
         let echo_broadcast_handle = self.echo_broadcast_handle.clone();
-        // let interval = tokio::time::interval(tokio::time::Duration::from_secs(15));
         tokio::spawn(async move {
-            dkg::trigger::run_dkg_trigger(15000, node_id, state, echo_broadcast_handle, None).await;
+            dkg::trigger::run_dkg_trigger(
+                15000,
+                node_id,
+                state,
+                echo_broadcast_handle,
+                None,
+                round_rx,
+            )
+            .await;
         });
 
         if self.connect_to_seeds().await.is_err() {
