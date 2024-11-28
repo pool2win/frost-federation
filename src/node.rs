@@ -124,6 +124,14 @@ impl Node {
         accept_ready_tx: oneshot::Sender<()>,
     ) {
         log::debug!("Starting... {}", self.bind_address);
+        let node_id = self.get_node_id().clone();
+        let state = self.state.clone();
+        let echo_broadcast_handle = self.echo_broadcast_handle.clone();
+        // let interval = tokio::time::interval(tokio::time::Duration::from_secs(15));
+        tokio::spawn(async move {
+            dkg::trigger::run_dkg_trigger(15000, node_id, state, echo_broadcast_handle, None).await;
+        });
+
         if self.connect_to_seeds().await.is_err() {
             log::info!("Connecting to seeds failed.");
             return;
@@ -214,21 +222,6 @@ impl Node {
             let delivery_timeout = self.delivery_timeout;
             let reliable_sender = reliable_sender_handle.clone();
             initialize_handshake(node_id, state, reliable_sender, delivery_timeout).await;
-
-            let node_id = self.get_node_id().clone();
-            let state = self.state.clone();
-            let echo_broadcast_handle = self.echo_broadcast_handle.clone();
-            let reliable_sender_handle = reliable_sender_handle.clone();
-            tokio::spawn(async move {
-                dkg::trigger::run_dkg_trigger(
-                    15000,
-                    node_id,
-                    state,
-                    echo_broadcast_handle,
-                    reliable_sender_handle,
-                )
-                .await;
-            });
         }
     }
 
@@ -257,22 +250,6 @@ impl Node {
                         self.echo_broadcast_handle.clone(),
                     )
                     .await;
-
-                let node_id = self.get_node_id().clone();
-                let state = self.state.clone();
-                let echo_broadcast_handle = self.echo_broadcast_handle.clone();
-                let reliable_sender_handle = reliable_sender_handle.clone();
-                let interval = tokio::time::interval(tokio::time::Duration::from_secs(15));
-                tokio::spawn(async move {
-                    dkg::trigger::run_dkg_trigger(
-                        15000,
-                        node_id,
-                        state,
-                        echo_broadcast_handle,
-                        reliable_sender_handle,
-                    )
-                    .await;
-                });
             } else {
                 log::debug!("Failed to connect to seed {}", seed);
                 return Err("Failed to connect to seed".into());

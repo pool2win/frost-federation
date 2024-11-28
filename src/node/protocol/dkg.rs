@@ -24,11 +24,16 @@ pub(crate) mod trigger;
 use crate::node::state::State;
 
 /// Get the max and min signers for the DKG
+/// Use the expected number of members in dkg state
 pub(crate) async fn get_max_min_signers(state: &State) -> (usize, usize) {
-    let members = state.membership_handle.get_members().await.unwrap();
-    let num_members = members.len() + 1;
+    log::debug!(
+        "Num members in get max min signers {}",
+        state.dkg_state.get_expected_members().await.unwrap()
+    );
+    let num_members = state.dkg_state.get_expected_members().await.unwrap_or(0) + 1;
     (num_members, (num_members * 2).div_ceil(3))
 }
+
 #[cfg(test)]
 mod tests {
     use frost_secp256k1 as frost;

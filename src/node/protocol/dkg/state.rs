@@ -51,6 +51,18 @@ impl State {
             expected_members,
         }
     }
+
+    /// Reset the DKG state for starting a new round
+    /// Retain the current key package and public key package as
+    /// they are replaced only on successful completion of DKG
+    pub async fn reset(&mut self, expected_members: usize) {
+        self.in_progress = true;
+        self.received_round1_packages = Round1Map::new();
+        self.received_round2_packages = Round2Map::new();
+        self.round1_secret_package = None;
+        self.round2_secret_package = None;
+        self.expected_members = expected_members;
+    }
 }
 
 /// Message for state handle to actor communication
@@ -98,6 +110,15 @@ pub(crate) enum StateMessage {
 
     /// Get the public key package
     GetPublicKeyPackage(oneshot::Sender<Option<frost::keys::PublicKeyPackage>>),
+
+    /// Set the expected members count
+    SetExpectedMembers(usize, oneshot::Sender<()>),
+
+    /// Get the expected members count
+    GetExpectedMembers(oneshot::Sender<usize>),
+
+    /// Reset the state
+    ResetState(usize, oneshot::Sender<()>),
 }
 
 pub(crate) struct Actor {
@@ -156,6 +177,17 @@ impl Actor {
                 StateMessage::GetPublicKeyPackage(respond_to) => {
                     self.get_public_key_package(respond_to);
                 }
+                StateMessage::SetExpectedMembers(count, respond_to) => {
+                    self.state.expected_members = count;
+                    let _ = respond_to.send(());
+                }
+                StateMessage::GetExpectedMembers(respond_to) => {
+                    let _ = respond_to.send(self.state.expected_members);
+                }
+                StateMessage::ResetState(expected_members, respond_to) => {
+                    self.state.reset(expected_members).await;
+                    let _ = respond_to.send(());
+                }
             }
         }
     }
@@ -170,6 +202,10 @@ impl Actor {
             .received_round1_packages
             .insert(identifier, package);
         let received_count = self.state.received_round1_packages.len();
+        log::info!(
+            "Received round1 packages count WHEN ADDING = {}",
+            received_count
+        );
         let _ = respond_to.send(received_count == self.state.expected_members);
     }
 
@@ -249,28 +285,33 @@ impl Actor {
     }
 }
 
+/// Start the DKG state actor and return the sender handle
+///
+/// This function creates a new channel, spawns the actor task to process messages,
+/// and returns the sender end of the channel.
+pub(crate) fn start_dkg_actor(expected_members: Option<usize>) -> mpsc::Sender<StateMessage> {
+    let (sender, receiver) = mpsc::channel(1);
+    let mut actor = Actor::new(receiver, expected_members.unwrap_or(0));
+
+    log::debug!("Actor spawning......");
+    // Spawn the actor task
+    tokio::spawn(async move {
+        actor.run().await;
+    });
+
+    sender
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct StateHandle {
     sender: mpsc::Sender<StateMessage>,
-    pub(crate) expected_members: Option<usize>,
 }
 
 impl StateHandle {
     /// Create a new state handle and spawn the actor
     pub fn new(expected_members: Option<usize>) -> Self {
-        let (sender, receiver) = mpsc::channel(1);
-        // default expected members = 1, as we count ourselves
-        let mut actor = Actor::new(receiver, expected_members.unwrap_or(1));
-
-        // Spawn the actor task
-        tokio::spawn(async move {
-            actor.run().await;
-        });
-
-        Self {
-            sender,
-            expected_members,
-        }
+        let sender = start_dkg_actor(expected_members);
+        Self { sender }
     }
 
     /// Add round1 package to state
@@ -397,6 +438,40 @@ impl StateHandle {
     ) -> Result<Option<frost::keys::PublicKeyPackage>, oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
         let message = StateMessage::GetPublicKeyPackage(tx);
+        let _ = self.sender.send(message).await;
+        rx.await
+    }
+
+    /// Set the expected members count
+    pub async fn set_expected_members(
+        &self,
+        count: usize,
+    ) -> Result<(), oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        let message = StateMessage::SetExpectedMembers(count, tx);
+        let _ = self.sender.send(message).await;
+        rx.await
+    }
+
+    /// Get the expected members count
+    pub async fn get_expected_members(&self) -> Result<usize, oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        let message = StateMessage::GetExpectedMembers(tx);
+        let _ = self.sender.send(message).await;
+        rx.await
+    }
+
+    /// Reset the state
+    pub async fn reset_state(
+        &self,
+        expected_members: usize,
+    ) -> Result<(), oneshot::error::RecvError> {
+        log::debug!(
+            "Resetting DKG state with expected members = {}",
+            expected_members
+        );
+        let (tx, rx) = oneshot::channel();
+        let message = StateMessage::ResetState(expected_members, tx);
         let _ = self.sender.send(message).await;
         rx.await
     }
@@ -570,6 +645,28 @@ mod dkg_state_tests {
         let retrieved_package = rx2.await.unwrap();
         assert_eq!(retrieved_package, Some(public_key_package));
     }
+
+    #[tokio::test]
+    async fn test_actor_expected_members() {
+        let (_tx, rx) = mpsc::channel(1);
+        let mut actor = Actor::new(rx, 3);
+
+        // Test initial value
+        let (tx, rx) = oneshot::channel();
+        actor.state.expected_members = 3;
+        let _ = tx.send(actor.state.expected_members);
+        assert_eq!(rx.await.unwrap(), 3);
+
+        // Test setting new value
+        let (tx, _rx) = oneshot::channel();
+        actor.state.expected_members = 5;
+        let _ = tx.send(());
+
+        // Test getting updated value
+        let (tx, rx) = oneshot::channel();
+        let _ = tx.send(actor.state.expected_members);
+        assert_eq!(rx.await.unwrap(), 5);
+    }
 }
 
 #[cfg(test)]
@@ -582,8 +679,8 @@ mod dkg_state_handle_tests {
 
     #[tokio::test]
     async fn test_state_handle_new() {
-        let handle = StateHandle::new(Some(0));
-        assert!(handle.sender.capacity() > 0);
+        let state_handle = StateHandle::new(Some(1));
+        assert!(state_handle.sender.capacity() > 0);
     }
 
     #[tokio::test]
@@ -859,5 +956,30 @@ mod dkg_state_handle_tests {
 
         let received_packages = state_handle.get_received_round2_packages().await.unwrap();
         assert_eq!(received_packages.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_state_handle_expected_members() {
+        let state_handle = StateHandle::new(Some(3));
+
+        // Test initial value
+        let initial_count = state_handle.get_expected_members().await.unwrap();
+        assert_eq!(initial_count, 3);
+
+        // Test setting new value
+        assert!(state_handle.set_expected_members(5).await.is_ok());
+
+        // Test getting updated value
+        let updated_count = state_handle.get_expected_members().await.unwrap();
+        assert_eq!(updated_count, 5);
+    }
+
+    #[tokio::test]
+    async fn test_state_handle_default_expected_members() {
+        // Test that None defaults to 0 expected member
+        let state_handle = StateHandle::new(None);
+
+        let count = state_handle.get_expected_members().await.unwrap();
+        assert_eq!(count, 0);
     }
 }

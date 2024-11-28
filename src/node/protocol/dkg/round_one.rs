@@ -52,6 +52,7 @@ async fn build_round1_package(
     let participant_identifier = frost::Identifier::derive(sender_id.as_bytes()).unwrap();
     let rng = thread_rng();
     log::debug!("SIGNERS: {} {}", max_signers, min_signers);
+
     let result = frost::keys::dkg::part1(
         participant_identifier,
         max_signers as u16,
@@ -133,8 +134,11 @@ impl Service<Message> for Package {
                     }),
                     _message_id,
                 ) => {
-                    log::debug!("Received round one package");
-                    log::info!("Received message {:?}", message);
+                    log::info!(
+                        "Received round one message from {} \n {:?}",
+                        from_sender_id,
+                        message
+                    );
                     let identifier = frost::Identifier::derive(from_sender_id.as_bytes()).unwrap();
                     state
                         .dkg_state

@@ -16,8 +16,6 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use std::result;
-
 use crate::node::membership::MembershipHandle;
 use crate::node::protocol::dkg;
 use crate::node::protocol::message_id_generator::MessageIdGenerator;
@@ -35,20 +33,27 @@ impl State {
         membership_handle: MembershipHandle,
         message_id_generator: MessageIdGenerator,
     ) -> Self {
-        let num_members = membership_handle.get_members().await.unwrap().len();
+        let expected_members = membership_handle.get_members().await.unwrap().len();
         Self {
             membership_handle,
             message_id_generator,
-            dkg_state: dkg::state::StateHandle::new(Some(num_members)),
+            dkg_state: dkg::state::StateHandle::new(Some(expected_members)),
         }
     }
 
-    /// Starts a new DKG round by setting the expected number of members
-    /// based on the current membership size
-    pub async fn start_new_dkg(&mut self) {
+    /// Updates the expected number of members for the DKG round
+    pub async fn update_expected_members(&mut self) {
         let num_members = self.membership_handle.get_members().await.unwrap().len();
-        log::info!("Starting DKG with membership = {}", num_members);
-        self.dkg_state = dkg::state::StateHandle::new(Some(num_members));
+        log::info!("Updating expected members to {}", num_members);
+        let _ = self.dkg_state.set_expected_members(num_members).await;
+    }
+
+    /// Starts a new DKG round by resetting the state
+    /// The expected number of members is based on the current membership size
+    pub async fn reset_dkg(&mut self) {
+        let num_members = self.membership_handle.get_members().await.unwrap().len();
+        log::info!("Restarting DKG with membership = {}", num_members);
+        let _ = self.dkg_state.reset_state(num_members).await;
     }
 }
 
@@ -72,8 +77,8 @@ mod tests {
         let message_id_generator = MessageIdGenerator::new("localhost".to_string());
         let mut state = State::new(membership_handle, message_id_generator).await;
 
-        state.start_new_dkg().await;
+        state.reset_dkg().await;
 
-        assert_eq!(state.dkg_state.expected_members, Some(1));
+        assert_eq!(state.dkg_state.get_expected_members().await.unwrap(), 1);
     }
 }
