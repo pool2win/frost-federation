@@ -24,7 +24,7 @@ use crate::node::reliable_sender::ReliableSenderHandle;
 use crate::node::State;
 use crate::node::{echo_broadcast::service::EchoBroadcast, protocol::Message};
 use frost_secp256k1 as frost;
-use frost_secp256k1::keys::{KeyPackage, PublicKeyPackage};
+use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 use tower::{BoxError, ServiceExt};
 
@@ -39,6 +39,7 @@ pub async fn run_dkg_trigger(
     mut state: State,
     echo_broadcast_handle: EchoBroadcastHandle,
     reliable_sender_handle: Option<ReliableSenderHandle>,
+    round_rx: mpsc::Receiver<()>,
 ) {
     let period = Duration::from_millis(duration_millis);
     let start = Instant::now() + period;
@@ -52,6 +53,7 @@ pub async fn run_dkg_trigger(
         state.clone(),
         echo_broadcast_handle.clone(),
         reliable_sender_handle.clone(),
+        round_rx,
     )
     .await;
 
@@ -109,6 +111,7 @@ pub(crate) async fn trigger_dkg(
     state: State,
     echo_broadcast_handle: EchoBroadcastHandle,
     reliable_sender_handle: Option<ReliableSenderHandle>,
+    mut round_rx: mpsc::Receiver<()>,
 ) -> Result<(), BoxError> {
     let protocol_service: Protocol =
         Protocol::new(node_id.clone(), state.clone(), reliable_sender_handle);
@@ -122,17 +125,15 @@ pub(crate) async fn trigger_dkg(
 
     let round2_future = build_round2_future(node_id.clone(), protocol_service.clone());
 
-    let sleep_future = tokio::time::sleep(Duration::from_secs(5));
-
     // TODO Improve this to allow round1 to finish as soon as all other parties have sent their round1 message
     // This will mean moving the timeout into round1 service
 
     // Wait for round1 to finish, give it 5 seconds
-    let (_, round1_result) = tokio::join!(sleep_future, round1_future);
-    if round1_result.is_err() {
+    if round1_future.await.is_err() {
         log::error!("Error running round 1");
-        round1_result?
+        return Err("Error running round 1".into());
     }
+    round_rx.recv().await.unwrap();
     log::info!("Round 1 finished");
 
     log::debug!(
@@ -144,12 +145,12 @@ pub(crate) async fn trigger_dkg(
             .unwrap()
     );
 
-    let sleep_future = tokio::time::sleep(Duration::from_secs(5));
     // start round2
-    let (_, round2_result) = tokio::join!(sleep_future, round2_future);
-    if round2_result.is_err() {
+    if round2_future.await.is_err() {
         log::error!("Error running round 2");
+        return Err("Error running round 2".into());
     }
+    round_rx.recv().await.unwrap();
     log::info!("Round 2 finished");
 
     // Get packages required to run part3
@@ -246,6 +247,8 @@ mod dkg_trigger_tests {
             mock
         });
 
+        let (round_tx, round_rx) = mpsc::channel::<()>(1);
+
         // Wait for just over one interval to ensure we get at least one trigger
         let result: Result<(), time::error::Elapsed> = timeout(
             Duration::from_millis(10),
@@ -255,6 +258,7 @@ mod dkg_trigger_tests {
                 state,
                 mock_echo_broadcast_handle,
                 Some(mock_reliable_sender_handle),
+                round_rx,
             ),
         )
         .await;

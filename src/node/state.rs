@@ -19,13 +19,14 @@
 use crate::node::membership::MembershipHandle;
 use crate::node::protocol::dkg;
 use crate::node::protocol::message_id_generator::MessageIdGenerator;
-
+use tokio::sync::mpsc;
 /// Handlers to query/update node state
 #[derive(Clone)]
 pub(crate) struct State {
     pub(crate) membership_handle: MembershipHandle,
     pub(crate) message_id_generator: MessageIdGenerator,
     pub(crate) dkg_state: dkg::state::StateHandle,
+    pub(crate) round_tx: Option<mpsc::Sender<()>>,
 }
 
 impl State {
@@ -38,6 +39,7 @@ impl State {
             membership_handle,
             message_id_generator,
             dkg_state: dkg::state::StateHandle::new(Some(expected_members)),
+            round_tx: None,
         }
     }
 

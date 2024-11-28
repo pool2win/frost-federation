@@ -126,6 +126,7 @@ impl Service<Message> for Package {
                 })) => {
                     match build_round2_packages(sender_id, state.clone()).await {
                         Ok((round2_secret_package, round2_packages)) => {
+                            log::debug!("Building round2 packages succeeded");
                             // Store the round2 secret package
                             if let Err(e) = state
                                 .dkg_state
@@ -155,11 +156,15 @@ impl Service<Message> for Package {
                 })) => {
                     // Received round2 message and save it in state
                     let identifier = frost::Identifier::derive(from_sender_id.as_bytes()).unwrap();
-                    state
+                    let finished = state
                         .dkg_state
                         .add_round2_package(identifier, message)
                         .await
                         .unwrap();
+                    if finished {
+                        log::debug!("Round two finished, sending signal");
+                        let _ = state.round_tx.unwrap().send(()).await;
+                    }
                     Ok(None)
                 }
                 _ => {
