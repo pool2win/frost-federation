@@ -227,7 +227,11 @@ impl EchoBroadcastActor {
 
     /// Check if echos have been received from all members for a given message identifier
     pub fn echo_received_for_all(&self, message_id: &MessageId) -> bool {
-        log::debug!("{:?}", self.message_echos);
+        log::debug!(
+            "Checking for echos for message id {:?}, {:?}",
+            message_id,
+            self.message_echos
+        );
         self.message_echos
             .get(message_id)
             .unwrap()

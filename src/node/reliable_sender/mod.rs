@@ -165,7 +165,6 @@ async fn start_reliable_sender(mut actor: ReliableSenderActor) {
             connection_msg = actor.connection_receiver.recv() => {
                 match connection_msg {
                     Some(msg) => {
-                        log::debug!("Received message from connection {:?}", msg);
                         if let Err(e) = actor.handle_connection_message(msg).await {
                             log::info!("Error handling received message. Shutting down. {}", e);
                             return

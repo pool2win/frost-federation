@@ -147,7 +147,7 @@ impl Service<Message> for Package {
                         .unwrap();
                     if finished {
                         log::debug!("Round one finished, sending signal");
-                        let _ = state.round_tx.unwrap().send(()).await;
+                        let _ = state.round_one_tx.unwrap().send(()).await;
                     }
                     Ok(None)
                 }

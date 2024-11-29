@@ -39,7 +39,8 @@ pub async fn run_dkg_trigger(
     mut state: State,
     echo_broadcast_handle: EchoBroadcastHandle,
     reliable_sender_handle: Option<ReliableSenderHandle>,
-    round_rx: mpsc::Receiver<()>,
+    round_one_rx: mpsc::Receiver<()>,
+    round_two_rx: mpsc::Receiver<()>,
 ) {
     let period = Duration::from_millis(duration_millis);
     let start = Instant::now() + period;
@@ -53,7 +54,8 @@ pub async fn run_dkg_trigger(
         state.clone(),
         echo_broadcast_handle.clone(),
         reliable_sender_handle.clone(),
-        round_rx,
+        round_one_rx,
+        round_two_rx,
     )
     .await;
 
@@ -111,7 +113,8 @@ pub(crate) async fn trigger_dkg(
     state: State,
     echo_broadcast_handle: EchoBroadcastHandle,
     reliable_sender_handle: Option<ReliableSenderHandle>,
-    mut round_rx: mpsc::Receiver<()>,
+    mut round_one_rx: mpsc::Receiver<()>,
+    mut round_two_rx: mpsc::Receiver<()>,
 ) -> Result<(), BoxError> {
     let protocol_service: Protocol =
         Protocol::new(node_id.clone(), state.clone(), reliable_sender_handle);
@@ -133,7 +136,7 @@ pub(crate) async fn trigger_dkg(
         log::error!("Error running round 1");
         return Err("Error running round 1".into());
     }
-    round_rx.recv().await.unwrap();
+    round_one_rx.recv().await.unwrap();
     log::info!("Round 1 finished");
 
     log::debug!(
@@ -150,7 +153,7 @@ pub(crate) async fn trigger_dkg(
         log::error!("Error running round 2");
         return Err("Error running round 2".into());
     }
-    round_rx.recv().await.unwrap();
+    round_two_rx.recv().await.unwrap();
     log::info!("Round 2 finished");
 
     // Get packages required to run part3
@@ -247,7 +250,8 @@ mod dkg_trigger_tests {
             mock
         });
 
-        let (round_tx, round_rx) = mpsc::channel::<()>(1);
+        let (round_one_tx, round_one_rx) = mpsc::channel::<()>(1);
+        let (round_two_tx, round_two_rx) = mpsc::channel::<()>(1);
 
         // Wait for just over one interval to ensure we get at least one trigger
         let result: Result<(), time::error::Elapsed> = timeout(
@@ -258,7 +262,8 @@ mod dkg_trigger_tests {
                 state,
                 mock_echo_broadcast_handle,
                 Some(mock_reliable_sender_handle),
-                round_rx,
+                round_one_rx,
+                round_two_rx,
             ),
         )
         .await;
