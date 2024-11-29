@@ -126,8 +126,10 @@ impl Node {
         log::debug!("Starting... {}", self.bind_address);
         let node_id = self.get_node_id().clone();
         let state = self.state.clone();
-        let (round_tx, round_rx) = mpsc::channel::<()>(1);
-        self.state.round_tx = Some(round_tx.clone());
+        let (round_one_tx, round_one_rx) = mpsc::channel::<()>(1);
+        self.state.round_one_tx = Some(round_one_tx.clone());
+        let (round_two_tx, round_two_rx) = mpsc::channel::<()>(1);
+        self.state.round_two_tx = Some(round_two_tx.clone());
         let echo_broadcast_handle = self.echo_broadcast_handle.clone();
         tokio::spawn(async move {
             dkg::trigger::run_dkg_trigger(
@@ -136,7 +138,8 @@ impl Node {
                 state,
                 echo_broadcast_handle,
                 None,
-                round_rx,
+                round_one_rx,
+                round_two_rx,
             )
             .await;
         });

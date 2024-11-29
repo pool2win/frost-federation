@@ -26,7 +26,8 @@ pub(crate) struct State {
     pub(crate) membership_handle: MembershipHandle,
     pub(crate) message_id_generator: MessageIdGenerator,
     pub(crate) dkg_state: dkg::state::StateHandle,
-    pub(crate) round_tx: Option<mpsc::Sender<()>>,
+    pub(crate) round_one_tx: Option<mpsc::Sender<()>>,
+    pub(crate) round_two_tx: Option<mpsc::Sender<()>>,
 }
 
 impl State {
@@ -39,7 +40,8 @@ impl State {
             membership_handle,
             message_id_generator,
             dkg_state: dkg::state::StateHandle::new(Some(expected_members)),
-            round_tx: None,
+            round_one_tx: None,
+            round_two_tx: None,
         }
     }
 
