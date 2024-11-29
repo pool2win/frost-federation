@@ -45,7 +45,7 @@ impl PackageMessage {
 /// Builds a round one package using the frost-secp256k1 crate
 async fn build_round1_package(
     sender_id: String,
-    state: crate::node::state::State,
+    state: &crate::node::state::State,
 ) -> Result<Message, frost::Error> {
     let (max_signers, min_signers) = get_max_min_signers(&state).await;
 
@@ -123,8 +123,19 @@ impl Service<Message> for Package {
                     _message_id,
                 ) => {
                     log::debug!("Build round one package");
-                    let response = build_round1_package(this_sender_id, state).await?;
+                    let response = build_round1_package(this_sender_id, &state).await?;
                     log::info!("Sending round one package {:?}", response);
+                    let finished = state
+                        .dkg_state
+                        .get_received_round1_packages()
+                        .await
+                        .unwrap()
+                        .len()
+                        == state.dkg_state.get_expected_members().await.unwrap();
+                    if finished {
+                        log::debug!("Round one finished, sending signal");
+                        let _ = state.round_one_tx.unwrap().send(()).await;
+                    }
                     Ok(Some(response))
                 }
                 Message::Broadcast(
@@ -207,7 +218,7 @@ mod round_one_package_tests {
         let membership_handle = build_membership(3).await;
         let state = State::new(membership_handle, message_id_generator).await;
 
-        let round1_package = build_round1_package("local".into(), state).await.unwrap();
+        let round1_package = build_round1_package("local".into(), &state).await.unwrap();
 
         // Extract the public key package from the NetworkMessage
         if let Message::Broadcast(BroadcastProtocol::DKGRoundOnePackage(pkg_msg), _message_id) =
@@ -232,7 +243,7 @@ mod round_one_package_tests {
         let state_clone = state.clone();
 
         // First create a round1 package that we'll pretend came from another node
-        let round1_package = build_round1_package("remote".into(), state).await.unwrap();
+        let round1_package = build_round1_package("remote".into(), &state).await.unwrap();
 
         // Create our local package service
         let mut pkg = Package::new("local".into(), state_clone);

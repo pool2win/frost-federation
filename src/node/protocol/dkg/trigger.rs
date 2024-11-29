@@ -131,10 +131,10 @@ pub(crate) async fn trigger_dkg(
     // TODO Improve this to allow round1 to finish as soon as all other parties have sent their round1 message
     // This will mean moving the timeout into round1 service
 
-    // Wait for round1 to finish, give it 5 seconds
-    if round1_future.await.is_err() {
-        log::error!("Error running round 1");
-        return Err("Error running round 1".into());
+    // Start round1
+    if let Err(e) = round1_future.await {
+        log::error!("Error running round 1: {:?}", e);
+        return Err("Error running round 1: failed with error".into());
     }
     round_one_rx.recv().await.unwrap();
     log::info!("Round 1 finished");
@@ -149,9 +149,9 @@ pub(crate) async fn trigger_dkg(
     );
 
     // start round2
-    if round2_future.await.is_err() {
-        log::error!("Error running round 2");
-        return Err("Error running round 2".into());
+    if let Err(e) = round2_future.await {
+        log::error!("Error running round 2: {:?}", e);
+        return Err("Error running round 2: failed with error".into());
     }
     round_two_rx.recv().await.unwrap();
     log::info!("Round 2 finished");

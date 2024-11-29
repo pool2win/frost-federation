@@ -125,12 +125,15 @@ impl Node {
     ) {
         log::debug!("Starting... {}", self.bind_address);
         let node_id = self.get_node_id().clone();
-        let state = self.state.clone();
-        let (round_one_tx, round_one_rx) = mpsc::channel::<()>(1);
-        self.state.round_one_tx = Some(round_one_tx.clone());
-        let (round_two_tx, round_two_rx) = mpsc::channel::<()>(1);
-        self.state.round_two_tx = Some(round_two_tx.clone());
         let echo_broadcast_handle = self.echo_broadcast_handle.clone();
+
+        // We can send message on the channel from both sending and receiving tasks
+        let (round_one_tx, round_one_rx) = mpsc::channel::<()>(2);
+        self.state.round_one_tx = Some(round_one_tx);
+        let (round_two_tx, round_two_rx) = mpsc::channel::<()>(2);
+        self.state.round_two_tx = Some(round_two_tx);
+
+        let state = self.state.clone();
         tokio::spawn(async move {
             dkg::trigger::run_dkg_trigger(
                 15000,
