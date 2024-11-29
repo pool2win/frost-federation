@@ -141,6 +141,17 @@ impl Service<Message> for Package {
                                 log::error!("Failed to send round2 packages: {:?}", e);
                                 return Err(e.into());
                             }
+                            let finished = state
+                                .dkg_state
+                                .get_received_round2_packages()
+                                .await
+                                .unwrap()
+                                .len()
+                                == state.dkg_state.get_expected_members().await.unwrap();
+                            if finished {
+                                log::debug!("Round two finished on send, sending signal");
+                                state.round_two_tx.unwrap().send(()).await?;
+                            }
                             log::debug!("Sent round2 packages");
                             Ok(None)
                         }
@@ -155,6 +166,11 @@ impl Service<Message> for Package {
                     message: Some(message), // received a message
                 })) => {
                     // Received round2 message and save it in state
+                    log::debug!(
+                        "Received round two message from {} \n {:?}",
+                        from_sender_id,
+                        message
+                    );
                     let identifier = frost::Identifier::derive(from_sender_id.as_bytes()).unwrap();
                     let finished = state
                         .dkg_state
@@ -162,8 +178,8 @@ impl Service<Message> for Package {
                         .await
                         .unwrap();
                     if finished {
-                        log::debug!("Round two finished, sending signal");
-                        let _ = state.round_two_tx.unwrap().send(()).await;
+                        log::debug!("Round two finished on receive, sending signal");
+                        state.round_two_tx.unwrap().send(()).await?;
                     }
                     Ok(None)
                 }
