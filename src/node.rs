@@ -32,6 +32,7 @@ use crate::node::state::State;
 use commands::{Command, Commands};
 #[mockall_double::double]
 use connection::ConnectionHandle;
+use frost_secp256k1 as frost;
 use protocol::message_id_generator::MessageIdGenerator;
 use std::error::Error;
 use tokio::{
@@ -177,6 +178,16 @@ impl Node {
                 std::io::ErrorKind::Other,
                 "Error getting members",
             ))),
+        }
+    }
+
+    pub async fn get_dkg_public_key(
+        &self,
+    ) -> Result<Option<frost::keys::PublicKeyPackage>, Box<dyn Error + Send>> {
+        match self.state.dkg_state.get_public_key_package().await {
+            Ok(Some(pkg)) => Ok(Some(pkg)),
+            Ok(None) => Ok(None),
+            Err(e) => Err(Box::new(e)),
         }
     }
 

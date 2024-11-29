@@ -17,13 +17,19 @@
 // <https://www.gnu.org/licenses/>.
 
 use crate::node::Node;
+use frost_secp256k1 as frost;
 use std::error::Error;
 use tokio::sync::{mpsc, oneshot};
 
+#[derive(Debug)]
 pub enum Command {
     Shutdown,
     GetMembers {
         respond_to: oneshot::Sender<Result<Vec<String>, Box<dyn Error + Send>>>,
+    },
+    GetDKGPublicKey {
+        respond_to:
+            oneshot::Sender<Result<Option<frost::keys::PublicKeyPackage>, Box<dyn Error + Send>>>,
     },
 }
 
@@ -47,6 +53,18 @@ impl CommandExecutor {
         let _ = self.tx.send(Command::GetMembers { respond_to: tx }).await;
         rx.await.unwrap()
     }
+
+    pub async fn get_dkg_public_key(
+        &self,
+    ) -> Result<Option<frost::keys::PublicKeyPackage>, Box<dyn Error + Send>> {
+        let (tx, rx) = oneshot::channel();
+
+        let _ = self
+            .tx
+            .send(Command::GetDKGPublicKey { respond_to: tx })
+            .await;
+        rx.await.unwrap()
+    }
 }
 
 /// Trait for commands interface to Node
@@ -59,6 +77,7 @@ impl Commands for Node {
     async fn start_command_loop(&self, mut command_rx: mpsc::Receiver<Command>) {
         log::debug!("Starting command loop....");
         while let Some(msg) = command_rx.recv().await {
+            log::debug!("Received command: {:?}", msg);
             match msg {
                 Command::Shutdown => {
                     log::info!("Shutting down....");
@@ -66,6 +85,9 @@ impl Commands for Node {
                 }
                 Command::GetMembers { respond_to } => {
                     let _ = respond_to.send(self.get_members().await);
+                }
+                Command::GetDKGPublicKey { respond_to } => {
+                    let _ = respond_to.send(self.get_dkg_public_key().await);
                 }
             }
         }
@@ -104,5 +126,41 @@ mod command_tests {
         // Node shuts down on shutdown command
         let _ = exector.shutdown().await;
         node_task.await;
+    }
+
+    #[tokio::test]
+    async fn it_should_return_none_when_no_dkg_public_key() {
+        env_logger::init();
+        let ctx = EchoBroadcastHandle::start_context();
+        ctx.expect().returning(|| {
+            let mut mock = EchoBroadcastHandle::default();
+            mock.expect_clone()
+                .returning(|| EchoBroadcastHandle::default());
+            mock
+        });
+
+        let (executor, command_rx) = CommandExecutor::new();
+        let mut node = Node::new()
+            .await
+            .seeds(vec![])
+            .bind_address("localhost:6880".to_string())
+            .static_key_pem("a key".to_string())
+            .delivery_timeout(1000);
+
+        let (ready_tx, _ready_rx) = oneshot::channel();
+        let node_task = node.start(command_rx, ready_tx);
+
+        let get_key_and_shutdown = async move {
+            // Get public key before DKG has run
+            let public_key = executor.get_dkg_public_key().await;
+            assert!(public_key.is_ok());
+            assert!(public_key.unwrap().is_none());
+
+            let _ = executor.shutdown().await;
+        };
+        tokio::select! {
+            _ = get_key_and_shutdown => {}
+            _ = node_task => {}
+        }
     }
 }
