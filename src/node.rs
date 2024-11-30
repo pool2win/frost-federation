@@ -137,7 +137,6 @@ impl Node {
         let state = self.state.clone();
         tokio::spawn(async move {
             dkg::trigger::run_dkg_trigger(
-                15000,
                 node_id,
                 state,
                 echo_broadcast_handle,
