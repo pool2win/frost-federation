@@ -38,7 +38,6 @@ pub async fn run_dkg_trigger(
     node_id: String,
     mut state: State,
     echo_broadcast_handle: EchoBroadcastHandle,
-    reliable_sender_handle: Option<ReliableSenderHandle>,
     round_one_rx: mpsc::Receiver<()>,
     round_two_rx: mpsc::Receiver<()>,
 ) {
@@ -53,7 +52,6 @@ pub async fn run_dkg_trigger(
         node_id.clone(),
         state.clone(),
         echo_broadcast_handle.clone(),
-        reliable_sender_handle.clone(),
         round_one_rx,
         round_two_rx,
     )
@@ -112,12 +110,10 @@ pub(crate) async fn trigger_dkg(
     node_id: String,
     state: State,
     echo_broadcast_handle: EchoBroadcastHandle,
-    reliable_sender_handle: Option<ReliableSenderHandle>,
     mut round_one_rx: mpsc::Receiver<()>,
     mut round_two_rx: mpsc::Receiver<()>,
 ) -> Result<(), BoxError> {
-    let protocol_service: Protocol =
-        Protocol::new(node_id.clone(), state.clone(), reliable_sender_handle);
+    let protocol_service: Protocol = Protocol::new(node_id.clone(), state.clone(), None);
 
     let round1_future = build_round1_future(
         node_id.clone(),
@@ -261,7 +257,6 @@ mod dkg_trigger_tests {
                 node_id,
                 state,
                 mock_echo_broadcast_handle,
-                Some(mock_reliable_sender_handle),
                 round_one_rx,
                 round_two_rx,
             ),

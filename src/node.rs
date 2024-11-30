@@ -141,7 +141,6 @@ impl Node {
                 node_id,
                 state,
                 echo_broadcast_handle,
-                None,
                 round_one_rx,
                 round_two_rx,
             )
