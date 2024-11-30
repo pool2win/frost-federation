@@ -19,13 +19,11 @@
 #[mockall_double::double]
 use crate::node::echo_broadcast::EchoBroadcastHandle;
 use crate::node::protocol::{dkg, Protocol};
-#[mockall_double::double]
-use crate::node::reliable_sender::ReliableSenderHandle;
 use crate::node::State;
 use crate::node::{echo_broadcast::service::EchoBroadcast, protocol::Message};
 use frost_secp256k1 as frost;
 use tokio::sync::mpsc;
-use tokio::time::{Duration, Instant};
+use tokio::time::Duration;
 use tower::{BoxError, ServiceExt};
 
 /// Timeout in seconds, for DKG rounds one and two.
@@ -34,18 +32,12 @@ const DKG_ROUND_TIMEOUT: u64 = 10;
 /// Runs the DKG trigger loop.
 /// This will trigger the DKG round one protocol after an initial wait.
 pub async fn run_dkg_trigger(
-    duration_millis: u64,
     node_id: String,
     mut state: State,
     echo_broadcast_handle: EchoBroadcastHandle,
     round_one_rx: mpsc::Receiver<()>,
     round_two_rx: mpsc::Receiver<()>,
 ) {
-    let period = Duration::from_millis(duration_millis);
-    let start = Instant::now() + period;
-    let mut interval = tokio::time::interval_at(start, period);
-    interval.tick().await; // Using tick here so we can later run this in a loop
-
     state.update_expected_members().await;
 
     let result = trigger_dkg(
@@ -253,7 +245,6 @@ mod dkg_trigger_tests {
         let result: Result<(), time::error::Elapsed> = timeout(
             Duration::from_millis(10),
             run_dkg_trigger(
-                15,
                 node_id,
                 state,
                 mock_echo_broadcast_handle,

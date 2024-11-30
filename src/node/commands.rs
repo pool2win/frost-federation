@@ -130,7 +130,6 @@ mod command_tests {
 
     #[tokio::test]
     async fn it_should_return_none_when_no_dkg_public_key() {
-        env_logger::init();
         let ctx = EchoBroadcastHandle::start_context();
         ctx.expect().returning(|| {
             let mut mock = EchoBroadcastHandle::default();
