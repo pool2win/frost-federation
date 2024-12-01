@@ -36,10 +36,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     setup_tracing()?;
 
     let (_commands, command_rx) = CommandExecutor::new();
-    let mut node = node::Node::new()
+    let mut node = node::Node::new(bind_address, config.peer.seeds)
         .await
-        .seeds(config.peer.seeds)
-        .bind_address(bind_address)
         .static_key_pem(config.noise.key)
         .delivery_timeout(config.peer.delivery_timeout);
 
