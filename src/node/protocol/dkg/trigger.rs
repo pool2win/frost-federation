@@ -35,25 +35,27 @@ pub async fn run_dkg_trigger(
     node_id: String,
     mut state: State,
     echo_broadcast_handle: EchoBroadcastHandle,
-    round_one_rx: mpsc::Receiver<()>,
-    round_two_rx: mpsc::Receiver<()>,
+    round_one_rx: &mut mpsc::Receiver<()>,
+    round_two_rx: &mut mpsc::Receiver<()>,
+    trigger_dkg_rx: &mut mpsc::Receiver<()>,
 ) {
-    state.update_expected_members().await;
+    while let Some(_) = trigger_dkg_rx.recv().await {
+        state.update_expected_members().await;
+        let result = run_dkg(
+            node_id.clone(),
+            state.clone(),
+            echo_broadcast_handle.clone(),
+            round_one_rx,
+            round_two_rx,
+        )
+        .await;
 
-    let result = trigger_dkg(
-        node_id.clone(),
-        state.clone(),
-        echo_broadcast_handle.clone(),
-        round_one_rx,
-        round_two_rx,
-    )
-    .await;
-
-    if let Err(e) = result {
-        log::error!("DKG trigger failed with error {:?}", e);
-        return;
-    } else {
-        log::info!("DKG trigger finished");
+        if let Err(e) = result {
+            log::error!("DKG trigger failed with error {:?}", e);
+            return;
+        } else {
+            log::info!("DKG trigger finished");
+        }
     }
 }
 
@@ -98,12 +100,12 @@ fn build_round2_future(
 
 /// Triggers the DKG round one protocol.
 /// This will return once the round package has been successfully sent to all members.
-pub(crate) async fn trigger_dkg(
+pub(crate) async fn run_dkg(
     node_id: String,
     state: State,
     echo_broadcast_handle: EchoBroadcastHandle,
-    mut round_one_rx: mpsc::Receiver<()>,
-    mut round_two_rx: mpsc::Receiver<()>,
+    round_one_rx: &mut mpsc::Receiver<()>,
+    round_two_rx: &mut mpsc::Receiver<()>,
 ) -> Result<(), BoxError> {
     let protocol_service: Protocol = Protocol::new(node_id.clone(), state.clone(), None);
 
@@ -238,9 +240,9 @@ mod dkg_trigger_tests {
             mock
         });
 
-        let (round_one_tx, round_one_rx) = mpsc::channel::<()>(1);
-        let (round_two_tx, round_two_rx) = mpsc::channel::<()>(1);
-
+        let (round_one_tx, mut round_one_rx) = mpsc::channel::<()>(1);
+        let (round_two_tx, mut round_two_rx) = mpsc::channel::<()>(1);
+        let (trigger_dkg_tx, mut trigger_dkg_rx) = mpsc::channel::<()>(1);
         // Wait for just over one interval to ensure we get at least one trigger
         let result: Result<(), time::error::Elapsed> = timeout(
             Duration::from_millis(10),
@@ -248,8 +250,9 @@ mod dkg_trigger_tests {
                 node_id,
                 state,
                 mock_echo_broadcast_handle,
-                round_one_rx,
-                round_two_rx,
+                &mut round_one_rx,
+                &mut round_two_rx,
+                &mut trigger_dkg_rx,
             ),
         )
         .await;
