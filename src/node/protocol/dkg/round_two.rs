@@ -16,8 +16,8 @@
 // along with Frost-Federation. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use crate::node::dkg::state::Round2Map;
 use crate::node::protocol::dkg::get_max_min_signers;
+use crate::node::protocol::dkg::state::Round2Map;
 use crate::node::protocol::Message;
 use crate::node::{self, protocol::Unicast};
 use frost_secp256k1 as frost;

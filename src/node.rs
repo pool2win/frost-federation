@@ -21,7 +21,7 @@ use self::echo_broadcast::EchoBroadcastHandle;
 use self::{membership::MembershipHandle, protocol::Message};
 use crate::node::echo_broadcast::service::EchoBroadcast;
 use crate::node::noise_handler::{NoiseHandler, NoiseIO};
-use crate::node::protocol::dkg;
+use crate::node::protocol::dkg::trigger::run_dkg_trigger;
 use crate::node::protocol::init::initialize_handshake;
 use crate::node::protocol::Protocol;
 use crate::node::reliable_sender::service::ReliableSend;
@@ -63,6 +63,7 @@ pub struct Node {
     pub delivery_timeout: u64,
     pub(crate) state: State,
     pub(crate) echo_broadcast_handle: EchoBroadcastHandle,
+    pub(crate) trigger_dkg_tx: mpsc::Sender<()>,
 }
 
 impl Node {
@@ -71,11 +72,35 @@ impl Node {
         let bind_address = "localhost".to_string();
         let message_id_generator = MessageIdGenerator::new(bind_address.clone());
         let echo_broadcast_handle = EchoBroadcastHandle::start().await;
-        let state = State::new(
+        let mut state = State::new(
             MembershipHandle::start(bind_address.clone()).await,
             message_id_generator,
         )
         .await;
+
+        // We can send message on the channel from both sending and receiving tasks
+        let (round_one_tx, mut round_one_rx) = mpsc::channel::<()>(2);
+        state.round_one_tx = Some(round_one_tx);
+        let (round_two_tx, mut round_two_rx) = mpsc::channel::<()>(2);
+        state.round_two_tx = Some(round_two_tx);
+
+        let (trigger_dkg_tx, mut trigger_dkg_rx) = mpsc::channel::<()>(1);
+
+        let echo_broadcast_handle_dkg = echo_broadcast_handle.clone();
+        let node_id = bind_address.clone();
+        let state_dkg = state.clone();
+        tokio::spawn(async move {
+            run_dkg_trigger(
+                node_id,
+                state_dkg,
+                echo_broadcast_handle_dkg,
+                &mut round_one_rx,
+                &mut round_two_rx,
+                &mut trigger_dkg_rx,
+            )
+            .await;
+        });
+
         Node {
             seeds: vec!["localhost:6680".to_string()],
             bind_address: bind_address.clone(),
@@ -83,6 +108,7 @@ impl Node {
             delivery_timeout: 500,
             state,
             echo_broadcast_handle,
+            trigger_dkg_tx,
         }
     }
 
@@ -125,27 +151,6 @@ impl Node {
         accept_ready_tx: oneshot::Sender<()>,
     ) {
         log::debug!("Starting... {}", self.bind_address);
-        let node_id = self.get_node_id().clone();
-        let echo_broadcast_handle = self.echo_broadcast_handle.clone();
-
-        // We can send message on the channel from both sending and receiving tasks
-        let (round_one_tx, round_one_rx) = mpsc::channel::<()>(2);
-        self.state.round_one_tx = Some(round_one_tx);
-        let (round_two_tx, round_two_rx) = mpsc::channel::<()>(2);
-        self.state.round_two_tx = Some(round_two_tx);
-
-        let state = self.state.clone();
-        tokio::spawn(async move {
-            dkg::trigger::run_dkg_trigger(
-                node_id,
-                state,
-                echo_broadcast_handle,
-                round_one_rx,
-                round_two_rx,
-            )
-            .await;
-        });
-
         if self.connect_to_seeds().await.is_err() {
             log::info!("Connecting to seeds failed.");
             return;
@@ -433,7 +438,12 @@ mod node_tests {
         let _m = MTX.lock();
 
         let ctx = EchoBroadcastHandle::start_context();
-        ctx.expect().returning(EchoBroadcastHandle::default);
+        ctx.expect().returning(|| {
+            let mut mock = EchoBroadcastHandle::default();
+            mock.expect_clone()
+                .returning(|| EchoBroadcastHandle::default());
+            mock
+        });
 
         let node = Node::new().await;
         assert_eq!(node.get_node_id(), "localhost");
@@ -444,7 +454,12 @@ mod node_tests {
         let _m = MTX.lock();
 
         let ctx = EchoBroadcastHandle::start_context();
-        ctx.expect().returning(EchoBroadcastHandle::default);
+        ctx.expect().returning(|| {
+            let mut mock = EchoBroadcastHandle::default();
+            mock.expect_clone()
+                .returning(|| EchoBroadcastHandle::default());
+            mock
+        });
 
         let node = Node::new()
             .await
@@ -469,7 +484,12 @@ mod node_tests {
         let _m = MTX.lock();
 
         let ctx = EchoBroadcastHandle::start_context();
-        ctx.expect().returning(EchoBroadcastHandle::default);
+        ctx.expect().returning(|| {
+            let mut mock = EchoBroadcastHandle::default();
+            mock.expect_clone()
+                .returning(|| EchoBroadcastHandle::default());
+            mock
+        });
 
         mockall::mock! {
             TcpListener{}
@@ -481,7 +501,12 @@ mod node_tests {
     #[tokio::test]
     async fn it_should_respond_to_unicast_messages() {
         let ctx = EchoBroadcastHandle::start_context();
-        ctx.expect().returning(EchoBroadcastHandle::default);
+        ctx.expect().returning(|| {
+            let mut mock = EchoBroadcastHandle::default();
+            mock.expect_clone()
+                .returning(|| EchoBroadcastHandle::default());
+            mock
+        });
 
         let unicast_message: Message = PingMessage::default().into();
         let mut reliable_sender_handle = ReliableSenderHandle::default();

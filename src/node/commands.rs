@@ -31,6 +31,9 @@ pub enum Command {
         respond_to:
             oneshot::Sender<Result<Option<frost::keys::PublicKeyPackage>, Box<dyn Error + Send>>>,
     },
+    RunDKG {
+        respond_to: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
+    },
 }
 
 #[derive(Clone)]
@@ -65,6 +68,12 @@ impl CommandExecutor {
             .await;
         rx.await.unwrap()
     }
+
+    pub async fn run_dkg(&self) -> Result<(), Box<dyn Error + Send>> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.tx.send(Command::RunDKG { respond_to: tx }).await;
+        rx.await.unwrap()
+    }
 }
 
 /// Trait for commands interface to Node
@@ -88,6 +97,13 @@ impl Commands for Node {
                 }
                 Command::GetDKGPublicKey { respond_to } => {
                     let _ = respond_to.send(self.get_dkg_public_key().await);
+                }
+                Command::RunDKG { respond_to } => {
+                    if let Err(e) = self.trigger_dkg_tx.send(()).await {
+                        let _ = respond_to.send(Err(Box::new(e)));
+                    } else {
+                        let _ = respond_to.send(Ok(()));
+                    }
                 }
             }
         }
