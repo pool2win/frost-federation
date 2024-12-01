@@ -130,10 +130,8 @@ mod command_tests {
         });
 
         let (exector, command_rx) = CommandExecutor::new();
-        let mut node = Node::new()
+        let mut node = Node::new("localhost:6880".to_string(), vec![])
             .await
-            .seeds(vec![])
-            .bind_address("localhost:6880".to_string())
             .static_key_pem("a key".to_string())
             .delivery_timeout(1000);
 
@@ -155,10 +153,8 @@ mod command_tests {
         });
 
         let (executor, command_rx) = CommandExecutor::new();
-        let mut node = Node::new()
+        let mut node = Node::new("localhost:6880".to_string(), vec![])
             .await
-            .seeds(vec![])
-            .bind_address("localhost:6880".to_string())
             .static_key_pem("a key".to_string())
             .delivery_timeout(1000);
 

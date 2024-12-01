@@ -67,9 +67,8 @@ pub struct Node {
 }
 
 impl Node {
-    /// Use builder pattern
-    pub async fn new() -> Self {
-        let bind_address = "localhost".to_string();
+    /// Create a new Node with the given bind address and seeds
+    pub async fn new(bind_address: String, seeds: Vec<String>) -> Self {
         let message_id_generator = MessageIdGenerator::new(bind_address.clone());
         let echo_broadcast_handle = EchoBroadcastHandle::start().await;
         let mut state = State::new(
@@ -102,8 +101,8 @@ impl Node {
         });
 
         Node {
-            seeds: vec!["localhost:6680".to_string()],
-            bind_address: bind_address.clone(),
+            seeds,
+            bind_address,
             static_key_pem: String::new(),
             delivery_timeout: 500,
             state,
@@ -445,7 +444,7 @@ mod node_tests {
             mock
         });
 
-        let node = Node::new().await;
+        let node = Node::new("localhost".to_string(), vec!["localhost:6680".to_string()]).await;
         assert_eq!(node.get_node_id(), "localhost");
     }
 
@@ -461,15 +460,13 @@ mod node_tests {
             mock
         });
 
-        let node = Node::new()
-            .await
-            .seeds(vec![
-                "localhost:6881".to_string(),
-                "localhost:6882".to_string(),
-            ])
-            .bind_address("localhost:6880".to_string())
-            .static_key_pem("a key".to_string())
-            .delivery_timeout(1000);
+        let node = Node::new(
+            "localhost:6880".to_string(),
+            vec!["localhost:6881".to_string(), "localhost:6882".to_string()],
+        )
+        .await
+        .static_key_pem("a key".to_string())
+        .delivery_timeout(1000);
 
         assert_eq!(node.get_node_id(), "localhost:6880");
         assert_eq!(node.bind_address, "localhost:6880");
@@ -491,10 +488,7 @@ mod node_tests {
             mock
         });
 
-        mockall::mock! {
-            TcpListener{}
-        }
-        let mut node = Node::new().await.bind_address("localhost:6880".to_string());
+        let mut node = Node::new("localhost:6880".to_string(), vec![]).await;
         assert!(node.listen().await.is_ok());
     }
 
