@@ -401,10 +401,13 @@ impl Node {
                 EchoBroadcast::new(protocol_service, echo_broadcast_handle, state, node_id);
             let timeout_layer =
                 tower::timeout::TimeoutLayer::new(tokio::time::Duration::from_millis(timeout));
-            let _ = timeout_layer
+            if let Err(e) = timeout_layer
                 .layer(echo_broadcast_service)
                 .oneshot(message)
-                .await;
+                .await
+            {
+                log::error!("Timeout error in broadcast message response: {}", e);
+            }
         });
     }
 

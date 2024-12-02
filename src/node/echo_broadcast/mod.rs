@@ -103,9 +103,7 @@ impl EchoBroadcastActor {
                 respond_to,
             } => {
                 // send echo to all members
-                let _ = self
-                    .send_echos_to_members(data.clone(), members, respond_to)
-                    .await;
+                let _ = self.send_echos(data.clone(), members, respond_to).await;
             }
             EchoBroadcastMessage::EchoReceive { data } => {
                 // manage echo data structures and confirm delivered
@@ -161,7 +159,7 @@ impl EchoBroadcastActor {
     /// Process:
     /// 1. Wait for echos from all members for the message sent
     /// 2. On receiving echos from all members, return Ok() to waiting receiver
-    pub async fn send_echos_to_members(
+    pub async fn send_echos(
         &mut self,
         data: Message,
         members: ReliableSenderMap,
@@ -241,7 +239,6 @@ impl EchoBroadcastActor {
 
     /// Add received echo from a sender to the list of echos received
     pub fn add_echo(&mut self, message_id: &MessageId, sender_id: String) {
-        log::debug!("Adding echo for {:?}, {:?}", message_id, sender_id);
         match self.message_echos.get_mut(message_id) {
             Some(echos) => {
                 echos
@@ -266,13 +263,12 @@ impl EchoBroadcastActor {
         let peer_id = data.get_sender_id();
         let message_id = data.get_message_id().unwrap();
 
-        log::debug!("Adding echo {:?} {:?}", message_id, peer_id);
+        log::debug!("Handling received echo {:?} {:?}", message_id, peer_id);
         self.add_echo(&message_id, peer_id);
-
         if self.echo_received_for_all(&message_id) {
             match self.message_client_txs.remove(&message_id) {
                 Some(respond_to) => {
-                    if respond_to.send(Ok(())).is_err() {
+                    if let Err(_) = respond_to.send(Ok(())) {
                         log::error!("Error responding on echo broadcast completion");
                     }
                     log::debug!("Broadcast message can be delivered now...");

@@ -129,15 +129,6 @@ pub(crate) async fn run_dkg(
     round_one_rx.recv().await.unwrap();
     log::info!("Round 1 finished");
 
-    log::debug!(
-        "received round1 packages = {:?}",
-        state
-            .dkg_state
-            .get_received_round1_packages()
-            .await
-            .unwrap()
-    );
-
     // start round2
     if let Err(e) = round2_future.await {
         log::error!("Error running round 2: {:?}", e);
@@ -240,9 +231,9 @@ mod dkg_trigger_tests {
             mock
         });
 
-        let (round_one_tx, mut round_one_rx) = mpsc::channel::<()>(1);
-        let (round_two_tx, mut round_two_rx) = mpsc::channel::<()>(1);
-        let (trigger_dkg_tx, mut trigger_dkg_rx) = mpsc::channel::<()>(1);
+        let (_round_one_tx, mut round_one_rx) = mpsc::channel::<()>(1);
+        let (_round_two_tx, mut round_two_rx) = mpsc::channel::<()>(1);
+        let (_trigger_dkg_tx, mut trigger_dkg_rx) = mpsc::channel::<()>(1);
         // Wait for just over one interval to ensure we get at least one trigger
         let result: Result<(), time::error::Elapsed> = timeout(
             Duration::from_millis(10),
