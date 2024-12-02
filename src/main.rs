@@ -35,14 +35,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
     setup_logging()?;
     setup_tracing()?;
 
-    let (_commands, command_rx) = CommandExecutor::new();
+    let (command_executor, command_rx) = CommandExecutor::new();
     let mut node = node::Node::new(bind_address, config.peer.seeds)
         .await
         .static_key_pem(config.noise.key)
         .delivery_timeout(config.peer.delivery_timeout);
 
+    // Spawn a task to run DKG after 5 seconds
+    // Only run DKG if RUN_DKG env var is set to 1
+    if std::env::var("RUN_DKG").unwrap_or_default() == "1" {
+        let executor = command_executor.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            if let Err(e) = executor.run_dkg().await {
+                log::error!("Failed to run DKG: {}", e);
+            }
+        });
+    }
+
+    // Start node
     let (ready_tx, _ready_rx) = oneshot::channel();
     node.start(command_rx, ready_tx).await;
+    log::info!("Stopping node");
     Ok(())
 }
 
