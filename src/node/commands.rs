@@ -70,8 +70,12 @@ impl CommandExecutor {
     }
 
     pub async fn run_dkg(&self) -> Result<(), Box<dyn Error + Send>> {
+        log::debug!("Running DKG....");
         let (tx, rx) = oneshot::channel();
-        let _ = self.tx.send(Command::RunDKG { respond_to: tx }).await;
+        if let Err(e) = self.tx.send(Command::RunDKG { respond_to: tx }).await {
+            log::error!("Error sending RunDKG command: {}", e);
+            return Err(Box::new(e));
+        }
         rx.await.unwrap()
     }
 }
@@ -86,7 +90,6 @@ impl Commands for Node {
     async fn start_command_loop(&self, mut command_rx: mpsc::Receiver<Command>) {
         log::debug!("Starting command loop....");
         while let Some(msg) = command_rx.recv().await {
-            log::debug!("Received command: {:?}", msg);
             match msg {
                 Command::Shutdown => {
                     log::info!("Shutting down....");
@@ -100,8 +103,10 @@ impl Commands for Node {
                 }
                 Command::RunDKG { respond_to } => {
                     if let Err(e) = self.trigger_dkg_tx.send(()).await {
+                        log::error!("Error sending RunDKG command: {}", e);
                         let _ = respond_to.send(Err(Box::new(e)));
                     } else {
+                        log::debug!("Sent RunDKG command");
                         let _ = respond_to.send(Ok(()));
                     }
                 }

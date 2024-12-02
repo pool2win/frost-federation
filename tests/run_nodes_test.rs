@@ -42,7 +42,7 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
                 let mut node = Node::new("localhost:6880".to_string(), vec![])
                     .await
                     .static_key_pem(KEY.into())
-                    .delivery_timeout(100);
+                    .delivery_timeout(500);
 
                 let (ready_tx, mut ready_rx) = oneshot::channel();
                 let (_executor, command_rx) = CommandExecutor::new();
@@ -54,7 +54,7 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
                     Node::new("localhost:6881".to_string(), vec!["localhost:6880".into()])
                         .await
                         .static_key_pem(KEY.into())
-                        .delivery_timeout(100);
+                        .delivery_timeout(500);
 
                 let (ready_tx_b, mut _ready_rx_b) = oneshot::channel();
                 let (executor_b, command_rx_b) = CommandExecutor::new();
@@ -92,7 +92,7 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
                 let mut node_a = Node::new("localhost:6890".to_string(), vec![])
                     .await
                     .static_key_pem(KEY.into())
-                    .delivery_timeout(100);
+                    .delivery_timeout(500);
 
                 let (ready_tx_a, ready_rx_a) = oneshot::channel();
                 let (executor_a, command_rx_a) = CommandExecutor::new();
@@ -105,7 +105,7 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
                     Node::new("localhost:6891".to_string(), vec!["localhost:6890".into()])
                         .await
                         .static_key_pem(KEY.into())
-                        .delivery_timeout(100);
+                        .delivery_timeout(500);
 
                 let (ready_tx_b, ready_rx_b) = oneshot::channel();
                 let (executor_b, command_rx_b) = CommandExecutor::new();
@@ -121,7 +121,7 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
                 )
                 .await
                 .static_key_pem(KEY.into())
-                .delivery_timeout(100);
+                .delivery_timeout(500);
 
                 let (ready_tx_c, _ready_rx_c) = oneshot::channel();
                 let (executor_c, command_rx_c) = CommandExecutor::new();

@@ -124,12 +124,12 @@ impl MembershipHandle {
 
     pub async fn get_members(&self) -> Result<ReliableSenderMap, BoxError> {
         let (respond_to, receiver) = oneshot::channel();
-        if self
+        if let Err(e) = self
             .sender
             .send(MembershipMessage::GetMembers(respond_to))
             .await
-            .is_err()
         {
+            log::error!("Error sending request to get members: {}", e);
             return Err("Error sending request to get members".into());
         }
         match receiver.await {
