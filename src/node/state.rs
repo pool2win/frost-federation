@@ -20,6 +20,8 @@ use crate::node::membership::MembershipHandle;
 use crate::node::protocol::dkg;
 use crate::node::protocol::message_id_generator::MessageIdGenerator;
 use tokio::sync::mpsc;
+use tracing::info;
+
 /// Handlers to query/update node state
 #[derive(Clone)]
 pub(crate) struct State {
@@ -48,7 +50,7 @@ impl State {
     /// Updates the expected number of members for the DKG round
     pub async fn update_expected_members(&mut self) {
         let num_members = self.membership_handle.get_members().await.unwrap().len();
-        log::info!("Updating expected members to {}", num_members);
+        info!("Updating expected members to {}", num_members);
         let _ = self.dkg_state.set_expected_members(num_members).await;
     }
 
@@ -56,7 +58,7 @@ impl State {
     /// The expected number of members is based on the current membership size
     pub async fn reset_dkg(&mut self) {
         let num_members = self.membership_handle.get_members().await.unwrap().len();
-        log::info!("Restarting DKG with membership = {}", num_members);
+        info!("Restarting DKG with membership = {}", num_members);
         let _ = self.dkg_state.reset_state(num_members).await;
     }
 }

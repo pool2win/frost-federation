@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower::{BoxError, Service};
+use tracing::{debug, info};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct PackageMessage {
@@ -51,7 +52,7 @@ async fn build_round1_package(
 
     let participant_identifier = frost::Identifier::derive(sender_id.as_bytes()).unwrap();
     let rng = thread_rng();
-    log::debug!("SIGNERS: {} {}", max_signers, min_signers);
+    debug!("SIGNERS: {} {}", max_signers, min_signers);
 
     let result = frost::keys::dkg::part1(
         participant_identifier,
@@ -61,7 +62,7 @@ async fn build_round1_package(
     );
     match result {
         Ok((secret_package, round1_package)) => {
-            log::debug!("Setting round one package as {:?}", round1_package);
+            debug!("Setting round one package as {:?}", round1_package);
             let _ = state
                 .dkg_state
                 .add_round1_secret_package(secret_package)
@@ -112,7 +113,7 @@ impl Service<Message> for Package {
     fn call(&mut self, msg: Message) -> Self::Future {
         let state = self.state.clone();
         let this_sender_id = self.sender_id.clone();
-        log::debug!("Handle round one package {:?}", msg);
+        debug!("Handle round one package {:?}", msg);
         async move {
             match msg {
                 Message::Broadcast(
@@ -122,9 +123,9 @@ impl Service<Message> for Package {
                     }),
                     _message_id,
                 ) => {
-                    log::debug!("Build round one package");
+                    debug!("Build round one package");
                     let response = build_round1_package(this_sender_id, &state).await?;
-                    log::info!("Sending round one package {:?}", response);
+                    info!("Sending round one package {:?}", response);
                     let finished = state
                         .dkg_state
                         .get_received_round1_packages()
@@ -133,7 +134,7 @@ impl Service<Message> for Package {
                         .len()
                         == state.dkg_state.get_expected_members().await.unwrap();
                     if finished {
-                        log::debug!("Round one finished, sending signal");
+                        debug!("Round one finished, sending signal");
                         let _ = state.round_one_tx.unwrap().send(()).await;
                     }
                     Ok(Some(response))
@@ -145,10 +146,9 @@ impl Service<Message> for Package {
                     }),
                     _message_id,
                 ) => {
-                    log::info!(
+                    info!(
                         "Received round one message from {} \n {:?}",
-                        from_sender_id,
-                        message
+                        from_sender_id, message
                     );
                     let identifier = frost::Identifier::derive(from_sender_id.as_bytes()).unwrap();
                     let finished = state
@@ -157,13 +157,13 @@ impl Service<Message> for Package {
                         .await
                         .unwrap();
                     if finished {
-                        log::debug!("Round one finished, sending signal");
+                        debug!("Round one finished, sending signal");
                         let _ = state.round_one_tx.unwrap().send(()).await;
                     }
                     Ok(None)
                 }
                 _ => {
-                    log::debug!("Unhandled message {:?}", msg);
+                    debug!("Unhandled message {:?}", msg);
                     Ok(None)
                 }
             }

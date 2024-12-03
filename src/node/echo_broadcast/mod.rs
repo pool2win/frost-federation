@@ -27,6 +27,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::error::Error;
 use tokio::sync::{mpsc, oneshot};
+use tracing::{debug, error, info, warn};
 
 pub mod service;
 
@@ -107,7 +108,7 @@ impl EchoBroadcastActor {
             }
             EchoBroadcastMessage::EchoReceive { data } => {
                 // manage echo data structures and confirm delivered
-                log::debug!("Handle received echo in actor");
+                debug!("Handle received echo in actor");
                 self.handle_received_echo(data).await;
             }
         }
@@ -138,7 +139,7 @@ impl EchoBroadcastActor {
         }
         for (member, reliable_sender) in &members {
             if reliable_sender.send(data.clone()).await.is_err() {
-                log::debug!("Error in reliable sender send...");
+                debug!("Error in reliable sender send...");
                 let _ = respond_to.send(Err("Error sending using reliable sender".into()));
                 return Err("Error sending message using reliable sender".into());
             }
@@ -172,7 +173,7 @@ impl EchoBroadcastActor {
         let message_id = data.get_message_id().unwrap();
         for (member, reliable_sender) in &members {
             if reliable_sender.send(data.clone()).await.is_err() {
-                log::debug!("Error in reliable sender send...");
+                debug!("Error in reliable sender send...");
                 let _ = respond_to.send(Err("Error sending using reliable sender".into()));
                 return Err("Error sending message using reliable sender".into());
             }
@@ -206,12 +207,12 @@ impl EchoBroadcastActor {
     {
         let sender_id = data.get_sender_id();
         let message_id = data.get_message_id().unwrap();
-        log::debug!("In actor receive message.... {}, {}", sender_id, node_id);
+        debug!("In actor receive message.... {}, {}", sender_id, node_id);
 
         for member in members.keys() {
             let message_echos = self.message_echos.entry(message_id.clone()).or_default();
             message_echos.entry(member.clone()).or_insert(false);
-            log::debug!("Setting to false for member {}", member);
+            debug!("Setting to false for member {}", member);
         }
         self.reliable_senders.insert(message_id.clone(), members);
 
@@ -225,10 +226,9 @@ impl EchoBroadcastActor {
 
     /// Check if echos have been received from all members for a given message identifier
     pub fn echo_received_for_all(&self, message_id: &MessageId) -> bool {
-        log::debug!(
+        debug!(
             "Checking for echos for message id {:?}, {:?}",
-            message_id,
-            self.message_echos
+            message_id, self.message_echos
         );
         self.message_echos
             .get(message_id)
@@ -263,18 +263,18 @@ impl EchoBroadcastActor {
         let peer_id = data.get_sender_id();
         let message_id = data.get_message_id().unwrap();
 
-        log::debug!("Handling received echo {:?} {:?}", message_id, peer_id);
+        debug!("Handling received echo {:?} {:?}", message_id, peer_id);
         self.add_echo(&message_id, peer_id);
         if self.echo_received_for_all(&message_id) {
             match self.message_client_txs.remove(&message_id) {
                 Some(respond_to) => {
                     if let Err(_) = respond_to.send(Ok(())) {
-                        log::error!("Error responding on echo broadcast completion");
+                        error!("Error responding on echo broadcast completion");
                     }
-                    log::debug!("Broadcast message can be delivered now...");
+                    debug!("Broadcast message can be delivered now...");
                 }
                 None => {
-                    log::error!("No receivers for the confirmed echo broadcast");
+                    error!("No receivers for the confirmed echo broadcast");
                 }
             }
         }
@@ -316,15 +316,15 @@ impl EchoBroadcastHandle {
             respond_to: sender_from_actor,
         };
         if self.sender.send(msg).await.is_err() {
-            log::debug!("Returning send error...");
+            debug!("Returning send error...");
             return Err("Connection error".into());
         }
-        log::debug!("Waiting for echos from members {:?}", members.into_keys());
+        debug!("Waiting for echos from members {:?}", members.into_keys());
         let result = receiver_from_actor.await;
         if result?.is_err() {
             Err("Broadcast error".into())
         } else {
-            log::debug!("Broadcast sent");
+            debug!("Broadcast sent");
             Ok(())
         }
     }
@@ -344,14 +344,14 @@ impl EchoBroadcastHandle {
             respond_to: sender_from_actor,
         };
         if self.sender.send(msg).await.is_err() {
-            log::debug!("Error tracking received broadcast...");
+            debug!("Error tracking received broadcast...");
             return Err("Connection error".into());
         }
         let result = receiver_from_actor.await;
         if result?.is_err() {
             Err("Broadcast error".into())
         } else {
-            log::debug!("TRACKING RECEIVED BROADCAST DONE......");
+            debug!("TRACKING RECEIVED BROADCAST DONE......");
             Ok(())
         }
     }
@@ -373,7 +373,7 @@ impl EchoBroadcastHandle {
             respond_to: sender_from_actor,
         };
         if self.sender.send(msg).await.is_err() {
-            log::debug!("Returning send error...");
+            debug!("Returning send error...");
             return Err("Connection error".into());
         }
         Ok(())

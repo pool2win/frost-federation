@@ -45,6 +45,7 @@ use tokio::{
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tower::Layer;
 use tower::ServiceExt;
+use tracing::{debug, error, info};
 
 pub mod commands;
 mod connection;
@@ -149,24 +150,24 @@ impl Node {
         command_rx: mpsc::Receiver<Command>,
         accept_ready_tx: oneshot::Sender<()>,
     ) {
-        log::debug!("Starting... {}", self.bind_address);
+        debug!("Starting... {}", self.bind_address);
         if self.connect_to_seeds().await.is_err() {
-            log::info!("Connecting to seeds failed.");
+            info!("Connecting to seeds failed.");
             return;
         }
         let listener = self.listen().await;
         if listener.is_err() {
-            log::info!("Error starting listen");
+            info!("Error starting listen");
         } else {
             let accept_task = self.start_accept(listener.unwrap(), accept_ready_tx);
             let command_task = self.start_command_loop(command_rx);
             // Stop node when accept returns or Command asks us to stop.
             tokio::select! {
                 _ = accept_task => {
-                    log::debug!("Accept finished");
+                    debug!("Accept finished");
                 },
                 _ = command_task => {
-                    log::debug!("Command finished");
+                    debug!("Command finished");
                 }
             };
         }
@@ -195,7 +196,7 @@ impl Node {
 
     /// Start listening
     pub async fn listen(&mut self) -> Result<TcpListener, Box<dyn Error>> {
-        log::debug!("Start listen...");
+        debug!("Start listen...");
         Ok(TcpListener::bind(self.bind_address.to_string()).await?)
     }
 
@@ -222,13 +223,13 @@ impl Node {
 
     /// Start accepting connections
     pub async fn start_accept(&self, listener: TcpListener, accept_ready_tx: oneshot::Sender<()>) {
-        log::debug!("Start accepting...");
+        debug!("Start accepting...");
         let initiator = true;
         let _ = accept_ready_tx.send(());
         loop {
-            log::debug!("Waiting on accept...");
+            debug!("Waiting on accept...");
             let (stream, socket_addr) = listener.accept().await.unwrap();
-            log::debug!("Accept connection from {}", socket_addr);
+            debug!("Accept connection from {}", socket_addr);
             let (reader, writer) = self.build_reader_writer(stream);
             let noise = NoiseHandler::new(initiator, self.static_key_pem.clone());
             let (connection_handle, connection_receiver) =
@@ -255,14 +256,14 @@ impl Node {
 
     /// Connect to all peers and start reader writer tasks
     pub async fn connect_to_seeds(&mut self) -> Result<(), Box<dyn Error>> {
-        log::debug!("Connecting to seeds...");
+        debug!("Connecting to seeds...");
         let seeds = self.seeds.clone();
         let init = false;
         for seed in seeds.iter() {
-            log::debug!("Connecting to seed {}", seed);
+            debug!("Connecting to seed {}", seed);
             if let Ok(stream) = TcpStream::connect(seed).await {
                 let peer_addr = stream.peer_addr().unwrap();
-                log::info!("Connected to {}", peer_addr);
+                info!("Connected to {}", peer_addr);
                 let (reader, writer) = self.build_reader_writer(stream);
                 let noise = NoiseHandler::new(init, self.static_key_pem.clone());
                 let (connection_handle, connection_receiver) =
@@ -279,7 +280,7 @@ impl Node {
                     )
                     .await;
             } else {
-                log::debug!("Failed to connect to seed {}", seed);
+                debug!("Failed to connect to seed {}", seed);
                 return Err("Failed to connect to seed".into());
             }
         }
@@ -314,7 +315,7 @@ impl Node {
                 match connection_message {
                     Some(message) => match message {
                         Message::Unicast(unicast_message) => {
-                            log::debug!("Unicast message received {:?}", unicast_message);
+                            debug!("Unicast message received {:?}", unicast_message);
                             Node::respond_to_unicast_message(
                                 node_id.clone(),
                                 timeout,
@@ -325,7 +326,7 @@ impl Node {
                             .await;
                         }
                         Message::Broadcast(broadcast_message, mid) => {
-                            log::debug!("Broadcast message received {:?}", broadcast_message);
+                            debug!("Broadcast message received {:?}", broadcast_message);
                             Node::respond_to_broadcast_message(
                                 node_id.clone(),
                                 timeout,
@@ -337,7 +338,7 @@ impl Node {
                             .await;
                         }
                         Message::Echo(broadcast_message, mid, peer_id) => {
-                            log::info!("Received echo from network ...");
+                            info!("Received echo from network ...");
                             Node::respond_to_echo_message(
                                 Message::Echo(broadcast_message, mid, peer_id),
                                 echo_broadcast_handle.clone(),
@@ -346,9 +347,9 @@ impl Node {
                         }
                     },
                     _ => {
-                        log::info!("Connection clean up");
+                        info!("Connection clean up");
                         if membership_handle.remove_member(peer_addr).await.is_ok() {
-                            log::info!("Member removed");
+                            info!("Member removed");
                         }
                         return;
                     }
@@ -387,7 +388,7 @@ impl Node {
         reliable_sender_handle: ReliableSenderHandle,
     ) {
         tokio::spawn(async move {
-            log::debug!("In respond to broadcast message {:?}", message);
+            debug!("In respond to broadcast message {:?}", message);
             // TODO - This could cause the echo to go to new
             // members who didn't receive the initial
             // broadcast. Make sure they ignore such a message
@@ -406,7 +407,7 @@ impl Node {
                 .oneshot(message)
                 .await
             {
-                log::error!("Timeout error in broadcast message response: {}", e);
+                error!("Timeout error in broadcast message response: {}", e);
             }
         });
     }
@@ -497,6 +498,7 @@ mod node_tests {
 
     #[tokio::test]
     async fn it_should_respond_to_unicast_messages() {
+        let _m = MTX.lock();
         let ctx = EchoBroadcastHandle::start_context();
         ctx.expect().returning(|| {
             let mut mock = EchoBroadcastHandle::default();
@@ -532,6 +534,8 @@ mod node_tests {
 
     #[tokio::test]
     async fn it_should_respond_to_broadcast_messages() {
+        let _m = MTX.lock();
+
         let ctx = EchoBroadcastHandle::start_context();
         ctx.expect().returning(EchoBroadcastHandle::default);
 

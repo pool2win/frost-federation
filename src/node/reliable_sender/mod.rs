@@ -27,6 +27,7 @@ use std::error::Error;
 use std::fmt::Debug;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::bytes::Bytes;
+use tracing::{debug, info};
 
 pub mod service;
 
@@ -127,24 +128,24 @@ impl ReliableSenderActor {
                     .send(ReliableNetworkMessage::Ack(sequence_number))
                     .await
                 {
-                    log::info!("Error sending ack {}", e);
+                    info!("Error sending ack {}", e);
                     return Err("Error sending ack".into());
                 }
                 // send message up to the client
                 if let Err(e) = self.client_tx.send(message).await {
-                    log::info!("Error sending message to client. {}", e);
+                    info!("Error sending message to client. {}", e);
                 }
             }
             ReliableNetworkMessage::Ack(sequence_number) => {
                 match self.waiting_for_ack.remove(&sequence_number) {
                     Some((_msg, sender)) => {
-                        log::debug!("Received ACK {}", sequence_number);
+                        debug!("Received ACK {}", sequence_number);
                         if let Err(e) = sender.send(Ok(())) {
-                            log::debug!("Error sending OK back to client {:?}", e);
+                            debug!("Error sending OK back to client {:?}", e);
                         }
                     }
                     None => {
-                        log::debug!("No message waiting for the ACK received");
+                        debug!("No message waiting for the ACK received");
                     }
                 }
             }
@@ -158,7 +159,7 @@ async fn start_reliable_sender(mut actor: ReliableSenderActor) {
         tokio::select! {
             Some(msg) = actor.receiver.recv() => {
                 if let Err(e) = actor.handle_message(msg).await {
-                    log::info!("Error handling message from client. Shutting down. {}", e);
+                    info!("Error handling message from client. Shutting down. {}", e);
                     return
                 }
             },
@@ -166,18 +167,18 @@ async fn start_reliable_sender(mut actor: ReliableSenderActor) {
                 match connection_msg {
                     Some(msg) => {
                         if let Err(e) = actor.handle_connection_message(msg).await {
-                            log::info!("Error handling received message. Shutting down. {}", e);
+                            info!("Error handling received message. Shutting down. {}", e);
                             return
                         }
                     },
                     None => {
-                        log::info!("Connection closed. Stopping reliable sender");
+                        info!("Connection closed. Stopping reliable sender");
                         return
                     }
                 }
             },
             else => {
-                log::info!("Bad message for reliable sender actor");
+                info!("Bad message for reliable sender actor");
                 return
             }
         }
@@ -214,7 +215,7 @@ impl ReliableSenderHandle {
                 respond_to: sender_from_actor,
             };
             if let Err(e) = this.sender.send(msg).await {
-                log::info!("Error sending message to actor. Shutting down. {}", e);
+                info!("Error sending message to actor. Shutting down. {}", e);
                 return Err("Error sending message to actor.".into());
             }
             if receiver_from_actor.await.is_err() {

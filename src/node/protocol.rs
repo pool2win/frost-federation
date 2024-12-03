@@ -19,6 +19,8 @@
 extern crate flexbuffers;
 extern crate serde;
 
+use tracing::{debug, error, info, trace, warn};
+
 pub(crate) mod dkg;
 mod handshake;
 mod heartbeat;

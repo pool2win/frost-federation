@@ -29,11 +29,10 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
     use frost_federation::node::Node;
     use std::time::Duration;
     use tokio::sync::oneshot;
+    use tracing::info;
 
     #[test]
     fn test_start_two_nodes_and_let_them_connect_without_an_error() {
-        let _ = env_logger::builder().is_test(true).try_init();
-
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -81,8 +80,6 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
 
     #[test]
     fn test_dkg_completes() {
-        let _ = env_logger::builder().is_test(true).try_init();
-
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -138,9 +135,9 @@ gSEA68zeZuy7PMMQC9ECPmWqDl5AOFj5bi243F823ZVWtXY=
                         let members_b = executor_b.get_members().await.unwrap();
                         let members_c = executor_c.get_members().await.unwrap();
 
-                        log::info!("members_a: {:?}", members_a);
-                        log::info!("members_b: {:?}", members_b);
-                        log::info!("members_c: {:?}", members_c);
+                        info!("members_a: {:?}", members_a);
+                        info!("members_b: {:?}", members_b);
+                        info!("members_c: {:?}", members_c);
                         if members_a.len() == 2 && members_b.len() == 2 && members_c.len() == 2 {
                             break;
                         }

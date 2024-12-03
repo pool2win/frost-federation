@@ -22,11 +22,12 @@ pub(crate) mod state;
 pub(crate) mod trigger;
 
 use crate::node::state::State;
+use tracing::debug;
 
 /// Get the max and min signers for the DKG
 /// Use the expected number of members in dkg state
 pub(crate) async fn get_max_min_signers(state: &State) -> (usize, usize) {
-    log::debug!(
+    debug!(
         "Num members in get max min signers {}",
         state.dkg_state.get_expected_members().await.unwrap()
     );
