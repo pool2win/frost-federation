@@ -108,9 +108,6 @@ pub(crate) async fn run_dkg(
     round_one_rx: &mut mpsc::Receiver<()>,
     round_two_rx: &mut mpsc::Receiver<()>,
 ) -> Result<(), BoxError> {
-    let span = tracing::span!(tracing::Level::TRACE, "run_dkg");
-    let _enter = span.enter();
-
     let protocol_service: Protocol = Protocol::new(node_id.clone(), state.clone(), None);
 
     let round1_future = build_round1_future(
