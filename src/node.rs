@@ -443,8 +443,13 @@ mod node_tests {
         let ctx = EchoBroadcastHandle::start_context();
         ctx.expect().returning(|| {
             let mut mock = EchoBroadcastHandle::default();
-            mock.expect_clone()
-                .returning(|| EchoBroadcastHandle::default());
+            mock.expect_clone().returning(|| {
+                let mut cloned = EchoBroadcastHandle::default();
+                cloned
+                    .expect_clone()
+                    .returning(|| EchoBroadcastHandle::default());
+                cloned
+            });
             mock
         });
 
@@ -487,8 +492,13 @@ mod node_tests {
         let ctx = EchoBroadcastHandle::start_context();
         ctx.expect().returning(|| {
             let mut mock = EchoBroadcastHandle::default();
-            mock.expect_clone()
-                .returning(|| EchoBroadcastHandle::default());
+            mock.expect_clone().returning(|| {
+                let mut cloned = EchoBroadcastHandle::default();
+                cloned
+                    .expect_clone()
+                    .returning(|| EchoBroadcastHandle::default());
+                cloned
+            });
             mock
         });
 
