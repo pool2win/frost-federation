@@ -443,13 +443,8 @@ mod node_tests {
         let ctx = EchoBroadcastHandle::start_context();
         ctx.expect().returning(|| {
             let mut mock = EchoBroadcastHandle::default();
-            mock.expect_clone().returning(|| {
-                let mut cloned = EchoBroadcastHandle::default();
-                cloned
-                    .expect_clone()
-                    .returning(|| EchoBroadcastHandle::default());
-                cloned
-            });
+            mock.expect_clone()
+                .returning(|| EchoBroadcastHandle::default());
             mock
         });
 
@@ -492,13 +487,8 @@ mod node_tests {
         let ctx = EchoBroadcastHandle::start_context();
         ctx.expect().returning(|| {
             let mut mock = EchoBroadcastHandle::default();
-            mock.expect_clone().returning(|| {
-                let mut cloned = EchoBroadcastHandle::default();
-                cloned
-                    .expect_clone()
-                    .returning(|| EchoBroadcastHandle::default());
-                cloned
-            });
+            mock.expect_clone()
+                .returning(|| EchoBroadcastHandle::default());
             mock
         });
 
@@ -508,6 +498,7 @@ mod node_tests {
 
     #[tokio::test]
     async fn it_should_respond_to_unicast_messages() {
+        let _m = MTX.lock();
         let ctx = EchoBroadcastHandle::start_context();
         ctx.expect().returning(|| {
             let mut mock = EchoBroadcastHandle::default();
@@ -543,6 +534,8 @@ mod node_tests {
 
     #[tokio::test]
     async fn it_should_respond_to_broadcast_messages() {
+        let _m = MTX.lock();
+
         let ctx = EchoBroadcastHandle::start_context();
         ctx.expect().returning(EchoBroadcastHandle::default);
 
