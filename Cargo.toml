@@ -5,14 +5,12 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.5.4", features = ["derive"] }
-env_logger = "0.10.1"
-log = "0.4.20"
 tokio = { version = "1", features = ["rt", "net", "macros", "rt-multi-thread", "tracing", "io-util"] }
 tokio-util = { version = "0.7.0", features = ["full"] }
 tokio-stream = { version = "0.1" }
 toml = "0.8.8"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3.1", default-features = false, features = ["fmt", "ansi", "env-filter", "tracing-log"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { version = "1.0.188", features = ["derive"] }
 serde_derive = "1.0.188"
 futures = "0.3.30"

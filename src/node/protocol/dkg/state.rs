@@ -20,6 +20,7 @@ use frost::keys::dkg;
 use frost_secp256k1::{self as frost, Identifier};
 use std::collections::BTreeMap;
 use tokio::sync::{mpsc, oneshot};
+use tracing::{debug, info};
 
 pub(crate) type Round1Map = BTreeMap<frost::Identifier, dkg::round1::Package>;
 pub(crate) type Round2Map = BTreeMap<frost::Identifier, frost::keys::dkg::round2::Package>;
@@ -202,7 +203,7 @@ impl Actor {
             .received_round1_packages
             .insert(identifier, package);
         let received_count = self.state.received_round1_packages.len();
-        log::info!(
+        info!(
             "Received round1 packages count WHEN ADDING = {}",
             received_count
         );
@@ -293,7 +294,7 @@ pub(crate) fn start_dkg_actor(expected_members: Option<usize>) -> mpsc::Sender<S
     let (sender, receiver) = mpsc::channel(1);
     let mut actor = Actor::new(receiver, expected_members.unwrap_or(0));
 
-    log::debug!("Actor spawning......");
+    debug!("Actor spawning......");
     // Spawn the actor task
     tokio::spawn(async move {
         actor.run().await;
@@ -466,7 +467,7 @@ impl StateHandle {
         &self,
         expected_members: usize,
     ) -> Result<(), oneshot::error::RecvError> {
-        log::debug!(
+        debug!(
             "Resetting DKG state with expected members = {}",
             expected_members
         );
@@ -757,7 +758,7 @@ mod dkg_state_handle_tests {
             rng.clone(),
         )
         .unwrap();
-        log::debug!("Secret package {:?}", secret_package);
+        debug!("Secret package {:?}", secret_package);
 
         // add our secret package to state
         state
@@ -883,7 +884,7 @@ mod dkg_state_handle_tests {
             rng.clone(),
         )
         .unwrap();
-        log::debug!("Secret package {:?}", secret_package);
+        debug!("Secret package {:?}", secret_package);
 
         // add our secret package to state
         state

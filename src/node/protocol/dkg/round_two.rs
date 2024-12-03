@@ -29,6 +29,7 @@ use std::{
     task::{Context, Poll},
 };
 use tower::{BoxError, Service};
+use tracing::{debug, error, info, trace, warn};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct PackageMessage {
@@ -60,7 +61,7 @@ impl Package {
     ) -> Result<(usize, usize), BoxError> {
         let members = self.state.membership_handle.get_members().await?;
         if members.len() != round2_packages.len() {
-            log::error!(
+            error!(
                 "Members: {:?} != Round2 packages: {:?}",
                 members.len(),
                 round2_packages.len()
@@ -76,7 +77,7 @@ impl Package {
                 let package = round2_packages.get(&identifier).unwrap();
                 let message = PackageMessage::new(self.sender_id.clone(), Some(package.clone()));
                 let message = Message::Unicast(Unicast::DKGRoundTwoPackage(message));
-                log::debug!("Queueing send to member: {:?}", member_id);
+                debug!("Queueing send to member: {:?}", member_id);
                 reliable_sender.send(message)
             })
             .collect();
@@ -89,15 +90,14 @@ impl Package {
                 Ok(_) => (s + 1, f),
                 Err(_) => (s, f + 1),
             });
-        log::debug!(
+        debug!(
             "Round2 package sends: {} succeeded, {} failed",
-            successes,
-            failures
+            successes, failures
         );
 
         // Check if any sends failed. We will change this to the threshold later
         if failures > 0 {
-            log::error!("One or more round2 package sends failed");
+            error!("One or more round2 package sends failed");
             return Err("Failed to send some round2 packages".into());
         }
         Ok((successes, failures))
@@ -126,19 +126,19 @@ impl Service<Message> for Package {
                 })) => {
                     match build_round2_packages(sender_id, state.clone()).await {
                         Ok((round2_secret_package, round2_packages)) => {
-                            log::debug!("Building round2 packages succeeded");
+                            debug!("Building round2 packages succeeded");
                             // Store the round2 secret package
                             if let Err(e) = state
                                 .dkg_state
                                 .add_round2_secret_package(round2_secret_package)
                                 .await
                             {
-                                log::error!("Failed to store round2 secret package: {:?}", e);
+                                error!("Failed to store round2 secret package: {:?}", e);
                                 return Err(e.into());
                             }
                             // Send round2 packages to all members
                             if let Err(e) = this.send_round2_packages(round2_packages).await {
-                                log::error!("Failed to send round2 packages: {:?}", e);
+                                error!("Failed to send round2 packages: {:?}", e);
                                 return Err(e.into());
                             }
                             let finished = state
@@ -149,14 +149,14 @@ impl Service<Message> for Package {
                                 .len()
                                 == state.dkg_state.get_expected_members().await.unwrap();
                             if finished {
-                                log::debug!("Round two finished on send, sending signal");
+                                debug!("Round two finished on send, sending signal");
                                 state.round_two_tx.unwrap().send(()).await?;
                             }
-                            log::debug!("Sent round2 packages");
+                            debug!("Sent round2 packages");
                             Ok(None)
                         }
                         Err(e) => {
-                            log::error!("Failed to build round2 packages: {:?}", e);
+                            error!("Failed to build round2 packages: {:?}", e);
                             Err(e.into())
                         }
                     }
@@ -166,7 +166,7 @@ impl Service<Message> for Package {
                     message: Some(message), // received a message
                 })) => {
                     // Received round2 message and save it in state
-                    log::debug!(
+                    debug!(
                         "Received round two message from {} \n {:?}",
                         from_sender_id,
                         message
@@ -178,13 +178,13 @@ impl Service<Message> for Package {
                         .await
                         .unwrap();
                     if finished {
-                        log::debug!("Round two finished on receive, sending signal");
+                        debug!("Round two finished on receive, sending signal");
                         state.round_two_tx.unwrap().send(()).await?;
                     }
                     Ok(None)
                 }
                 _ => {
-                    log::error!(
+                    error!(
                         "Not a Unicast message {:?}. Should not happen, but we need to match all message types",
                         msg
                     );
@@ -204,10 +204,9 @@ pub async fn build_round2_packages(
     state: crate::node::state::State,
 ) -> Result<(frost::keys::dkg::round2::SecretPackage, Round2Map), frost::Error> {
     let (max_signers, min_signers) = get_max_min_signers(&state).await;
-    log::info!(
+    info!(
         "Building round2 packages with max signers = {} and min signers = {}",
-        max_signers,
-        min_signers
+        max_signers, min_signers
     );
 
     let secret_package = match state.dkg_state.get_round1_secret_package().await.unwrap() {
@@ -220,7 +219,7 @@ pub async fn build_round2_packages(
         .get_received_round1_packages()
         .await
         .unwrap();
-    log::info!(
+    info!(
         "Received round1 packages count = {}",
         received_packages.len()
     );
@@ -296,7 +295,6 @@ mod round_two_tests {
 
     #[tokio::test]
     async fn test_send_round2_packages_without_errors() {
-        let _ = env_logger::try_init();
         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
         for i in 1..3 {
             let mut mock_reliable_sender = ReliableSenderHandle::default();
@@ -341,8 +339,6 @@ mod round_two_tests {
 
     #[tokio::test]
     async fn test_send_round2_packages_with_error() {
-        let _ = env_logger::try_init();
-
         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
 
         let mut mock_reliable_sender = ReliableSenderHandle::default();
@@ -404,8 +400,6 @@ mod round_two_tests {
 
     #[tokio::test]
     async fn test_add_received_round2_package() {
-        let _ = env_logger::try_init();
-
         let membership_handle = MembershipHandle::start("localhost".to_string()).await;
 
         for i in 1..3 {

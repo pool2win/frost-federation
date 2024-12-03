@@ -23,6 +23,7 @@ use std::marker::Send;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::StreamExt; // Bring StreamExt in scope for access to `next` calls
 use tokio_util::bytes::{Bytes, BytesMut};
+use tracing::{debug, info};
 
 type ConnectionError = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub(crate) type ConnectionResult<T> = std::result::Result<T, ConnectionError>;
@@ -63,7 +64,7 @@ where
         // Set up a length delimted codec
 
         run_handshake(&mut noise, init, &mut reader, &mut writer).await;
-        log::debug!("Noise transport started");
+        debug!("Noise transport started");
 
         ConnectionActor {
             reader,
@@ -90,13 +91,13 @@ where
         msg: ReliableNetworkMessage,
         respond_to: ConnectionResultSender,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        log::debug!("handle_send {:?}", msg);
+        debug!("handle_send {:?}", msg);
         match msg.as_bytes() {
             Some(network_message) => {
                 let data = self.noise.build_transport_message(&network_message);
                 match self.writer.send(data).await {
                     Err(_) => {
-                        log::info!("Closing connection");
+                        info!("Closing connection");
                         Err("Error writing to socket stream".into())
                     }
                     Ok(_) => {
@@ -115,7 +116,7 @@ where
     ) -> Result<(), Box<dyn std::error::Error>> {
         let decrypted_message = self.noise.read_transport_message(message);
         let network_message = ReliableNetworkMessage::from_bytes(&decrypted_message)?;
-        log::debug!("Received message {:?}", network_message);
+        debug!("Received message {:?}", network_message);
         self.subscriber.send(network_message).await?;
         Ok(())
     }
@@ -132,7 +133,7 @@ where
             Some(message) = actor.receiver.recv() => { // read next command from handle
                 // TODO: Enable concurrent processing of messages received on a connection. Currently we handle one message at a time.
                 if actor.handle_message(message).await.is_err() {
-                    log::info!("Connection actor reader closed");
+                    info!("Connection actor reader closed");
                     return;
                 }
             }
@@ -140,20 +141,20 @@ where
                 match message {
                     Some(message) => {
                         if message.is_err() {
-                            log::info!("Connection closed by peer");
+                            info!("Connection closed by peer");
                             return
                         }
                         let msg = message.unwrap().freeze();
                         actor.handle_received(msg.clone()).await.unwrap();
                     },
                     None => { // Stream closed, return to clear up connection
-                        log::debug!("Connection actor reader closed");
+                        debug!("Connection actor reader closed");
                         return;
                     }
                 }
             }
             else => {
-                log::debug!("Connection actor stopping");
+                debug!("Connection actor stopping");
                 return;
             }
         }
@@ -189,7 +190,7 @@ impl ConnectionHandle {
     }
 
     pub async fn send(&self, data: ReliableNetworkMessage) -> ConnectionResult<()> {
-        log::debug!("Send {:?}", data);
+        debug!("Send {:?}", data);
         let (sender, receiver) = oneshot::channel();
         let msg = ConnectionMessage::Send {
             data,

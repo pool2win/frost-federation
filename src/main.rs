@@ -25,6 +25,9 @@ use frost_federation::cli;
 use frost_federation::config;
 use frost_federation::node;
 
+extern crate tracing;
+use tracing::{error, info};
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = cli::Cli::parse();
@@ -32,7 +35,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let config = config::load_config_from_file(args.config_file).unwrap();
     let bind_address = config::get_bind_address(config.network);
 
-    setup_logging()?;
     setup_tracing()?;
 
     let (command_executor, command_rx) = CommandExecutor::new();
@@ -48,7 +50,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         tokio::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
             if let Err(e) = executor.run_dkg().await {
-                log::error!("Failed to run DKG: {}", e);
+                error!("Failed to run DKG: {}", e);
             }
         });
     }
@@ -56,17 +58,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Start node
     let (ready_tx, _ready_rx) = oneshot::channel();
     node.start(command_rx, ready_tx).await;
-    log::info!("Stopping node");
+    info!("Stopping node");
     Ok(())
 }
 
 fn setup_tracing() -> Result<(), Box<dyn Error>> {
-    let subscriber = tracing_subscriber::FmtSubscriber::new();
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .finish();
     tracing::subscriber::set_global_default(subscriber)?;
-    Ok(())
-}
-
-fn setup_logging() -> Result<(), Box<dyn Error>> {
-    env_logger::init();
     Ok(())
 }

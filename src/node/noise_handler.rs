@@ -20,6 +20,7 @@ use ed25519_dalek::pkcs8::DecodePrivateKey;
 use ed25519_dalek::{SigningKey, SECRET_KEY_LENGTH};
 use snow::{HandshakeState, Keypair, TransportState};
 use tokio_util::bytes::Bytes;
+use tracing::{debug, info};
 
 // TODO[pool2win]: Change this to XK once we have setup pubkey as node id
 //
@@ -166,18 +167,18 @@ pub mod handshake {
         W: SinkExt<Bytes> + Unpin,
     {
         let m1 = noise.build_handshake_message(b"1");
-        log::debug!("m1 : {:?}", m1.clone());
+        debug!("m1 : {:?}", m1.clone());
         let _ = writer.send(m1).await;
 
         let m2 = reader.next().await.unwrap().unwrap().freeze();
-        log::debug!("m2 : {:?}", m2.clone());
+        debug!("m2 : {:?}", m2.clone());
         let _ = noise.read_handshake_message(m2);
 
         let m3 = noise.build_handshake_message(b"-> s, se");
-        log::debug!("m3 : {:?}", m3.clone());
+        debug!("m3 : {:?}", m3.clone());
         let _ = writer.send(m3).await;
 
-        log::info!("Noise channel ready");
+        info!("Noise channel ready");
     }
 
     /// Run initiator handshake steps. The steps here depend on the
@@ -188,18 +189,18 @@ pub mod handshake {
         W: SinkExt<Bytes> + Unpin,
     {
         let m1 = reader.next().await.unwrap().unwrap().freeze();
-        log::debug!("m1 : {:?}", m1.clone());
+        debug!("m1 : {:?}", m1.clone());
         let _ = noise.read_handshake_message(m1);
 
         let m2 = noise.build_handshake_message(b"<- e, ee, s, es");
-        log::debug!("m2 : {:?}", m2.clone());
+        debug!("m2 : {:?}", m2.clone());
         let _ = writer.send(m2).await;
 
         let m3 = reader.next().await.unwrap().unwrap().freeze();
-        log::debug!("m3 : {:?}", m3.clone());
+        debug!("m3 : {:?}", m3.clone());
         let _ = noise.read_handshake_message(m3);
 
-        log::info!("Noise channel ready");
+        info!("Noise channel ready");
     }
 }
 

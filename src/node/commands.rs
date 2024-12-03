@@ -20,6 +20,7 @@ use crate::node::Node;
 use frost_secp256k1 as frost;
 use std::error::Error;
 use tokio::sync::{mpsc, oneshot};
+use tracing::{debug, error, info};
 
 #[derive(Debug)]
 pub enum Command {
@@ -70,10 +71,10 @@ impl CommandExecutor {
     }
 
     pub async fn run_dkg(&self) -> Result<(), Box<dyn Error + Send>> {
-        log::debug!("Running DKG....");
+        debug!("Running DKG....");
         let (tx, rx) = oneshot::channel();
         if let Err(e) = self.tx.send(Command::RunDKG { respond_to: tx }).await {
-            log::error!("Error sending RunDKG command: {}", e);
+            error!("Error sending RunDKG command: {}", e);
             return Err(Box::new(e));
         }
         rx.await.unwrap()
@@ -88,11 +89,11 @@ pub(crate) trait Commands {
 impl Commands for Node {
     /// Command event loop receives commands from RPC
     async fn start_command_loop(&self, mut command_rx: mpsc::Receiver<Command>) {
-        log::debug!("Starting command loop....");
+        debug!("Starting command loop....");
         while let Some(msg) = command_rx.recv().await {
             match msg {
                 Command::Shutdown => {
-                    log::info!("Shutting down....");
+                    info!("Shutting down....");
                     return;
                 }
                 Command::GetMembers { respond_to } => {
@@ -103,16 +104,16 @@ impl Commands for Node {
                 }
                 Command::RunDKG { respond_to } => {
                     if let Err(e) = self.trigger_dkg_tx.send(()).await {
-                        log::error!("Error sending RunDKG command: {}", e);
+                        error!("Error sending RunDKG command: {}", e);
                         let _ = respond_to.send(Err(Box::new(e)));
                     } else {
-                        log::debug!("Sent RunDKG command");
+                        debug!("Sent RunDKG command");
                         let _ = respond_to.send(Ok(()));
                     }
                 }
             }
         }
-        log::debug!("Stopping command loop....");
+        debug!("Stopping command loop....");
     }
 }
 

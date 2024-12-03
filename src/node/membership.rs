@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
 use tower::BoxError;
 pub type ReliableSenderMap = HashMap<String, ReliableSenderHandle>;
+use tracing::{error, info};
 
 pub enum MembershipMessage {
     Add(String, ReliableSenderHandle, oneshot::Sender<()>),
@@ -104,7 +105,7 @@ impl MembershipHandle {
         match receiver.await {
             Err(_) => Err("Error adding member".into()),
             Ok(_) => {
-                log::info!("New member added: {}", member);
+                info!("New member added: {}", member);
                 Ok(())
             }
         }
@@ -129,7 +130,7 @@ impl MembershipHandle {
             .send(MembershipMessage::GetMembers(respond_to))
             .await
         {
-            log::error!("Error sending request to get members: {}", e);
+            error!("Error sending request to get members: {}", e);
             return Err("Error sending request to get members".into());
         }
         match receiver.await {

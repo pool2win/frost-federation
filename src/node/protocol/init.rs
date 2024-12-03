@@ -21,6 +21,7 @@ use crate::node::reliable_sender::service::ReliableSend;
 #[mockall_double::double]
 use crate::node::reliable_sender::ReliableSenderHandle;
 use crate::node::State;
+use tracing::{debug, info};
 
 use tokio::time::Duration;
 use tower::{timeout::TimeoutLayer, Layer, ServiceExt};
@@ -40,7 +41,7 @@ pub(crate) async fn initialize_handshake(
         .oneshot(HandshakeMessage::default().into())
         .await;
 
-    log::info!("Handshake finished");
+    info!("Handshake finished");
 }
 
 pub(crate) async fn send_membership(
@@ -49,7 +50,7 @@ pub(crate) async fn send_membership(
     state: State,
     delivery_time: u64,
 ) {
-    log::info!("Sending membership information");
+    info!("Sending membership information");
     let protocol_service = Protocol::new(node_id.clone(), state, Some(sender.clone()));
     let reliable_sender_service = ReliableSend::new(protocol_service, sender);
     let timeout_layer =
@@ -58,5 +59,5 @@ pub(crate) async fn send_membership(
         .layer(reliable_sender_service)
         .oneshot(MembershipMessage::new(node_id, None).into())
         .await;
-    log::debug!("Membership sending result {:?}", res);
+    debug!("Membership sending result {:?}", res);
 }

@@ -20,6 +20,7 @@ use serde::Deserialize;
 use std::error::Error;
 use std::fs::File;
 use std::io::prelude::*;
+use tracing::info;
 
 /// Struct to capture configuration from config.toml
 #[derive(Deserialize, Default, Debug, PartialEq)]
@@ -133,7 +134,7 @@ pub struct NoiseConfig {
 pub fn load_config_from_file(path: String) -> Option<Config> {
     match read_file(path) {
         Err(_) => {
-            log::info!("No config.toml file provided.");
+            info!("No config.toml file provided.");
             Some(Config::default())
         }
         Ok(contents) => parse_config_from_string(contents),
@@ -146,7 +147,7 @@ fn parse_config_from_string(contents: String) -> Option<Config> {
     match config {
         Ok(config) => config,
         Err(e) => {
-            log::info!("Error parsing config file {:?}", e);
+            info!("Error parsing config file {:?}", e);
             None
         }
     }
@@ -207,7 +208,6 @@ mod tests {
 
     #[test]
     fn it_should_load_default_for_missing_fields() {
-        let _ = env_logger::try_init();
         let conf = parse_config_from_string(
             r#"
     [network]
@@ -227,7 +227,6 @@ mod tests {
 
     #[test]
     fn it_should_load_default_for_missing_fields_for_network() {
-        let _ = env_logger::try_init();
         let conf = parse_config_from_string(
             r#"
     [network]"#
@@ -246,7 +245,6 @@ mod tests {
 
     #[test]
     fn it_should_load_default_for_missing_fields_for_peer() {
-        let _ = env_logger::try_init();
         let conf = parse_config_from_string(
             r#"
     [peer]"#
@@ -265,7 +263,6 @@ mod tests {
 
     #[test]
     fn it_should_load_default_for_missing_fields_in_multiple_sections() {
-        let _ = env_logger::try_init();
         let conf = parse_config_from_string(
             r#"
     [network]
@@ -288,7 +285,6 @@ mod tests {
 
     #[test]
     fn it_should_load_config_without_errors() {
-        let _ = env_logger::try_init();
         let conf = load_config_from_file("config.toml".to_string()).unwrap();
         let network = conf.network;
         let peer = conf.peer;
@@ -305,7 +301,6 @@ mod tests {
 
     #[test]
     fn it_should_load_default_config_when_file_not_found() {
-        let _ = env_logger::try_init();
         let conf = load_config_from_file("no_such_file.toml".to_string()).unwrap();
         let network = conf.network;
         let peer = conf.peer;
@@ -322,7 +317,6 @@ mod tests {
 
     #[test]
     fn it_should_get_bind_address_from_config() {
-        let _ = env_logger::try_init();
         let conf = load_config_from_file("config.toml".to_string()).unwrap();
         let network = conf.network;
         assert_eq!(get_bind_address(network), "localhost:6680");

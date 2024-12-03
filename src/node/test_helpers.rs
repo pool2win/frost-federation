@@ -25,6 +25,7 @@ pub(crate) mod support {
     use frost_secp256k1 as frost;
     use rand::thread_rng;
     use std::collections::BTreeMap;
+    use tracing::debug;
 
     /// Builds a membership with the given number of nodes
     /// Do not add the local node to the membership, therefore it loops from 1 to num
@@ -56,7 +57,7 @@ pub(crate) mod support {
             rng.clone(),
         )
         .unwrap();
-        log::debug!("Secret package {:?}", secret_package);
+        debug!("Secret package {:?}", secret_package);
 
         // add our secret package to state
         state

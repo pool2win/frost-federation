@@ -25,6 +25,7 @@ use frost_secp256k1 as frost;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
 use tower::{BoxError, ServiceExt};
+use tracing::{debug, error, info};
 
 /// Timeout in seconds, for DKG rounds one and two.
 const DKG_ROUND_TIMEOUT: u64 = 10;
@@ -51,10 +52,10 @@ pub async fn run_dkg_trigger(
         .await;
 
         if let Err(e) = result {
-            log::error!("DKG trigger failed with error {:?}", e);
+            error!("DKG trigger failed with error {:?}", e);
             return;
         } else {
-            log::info!("DKG trigger finished");
+            info!("DKG trigger finished");
         }
     }
 }
@@ -75,7 +76,7 @@ fn build_round1_future(
     );
 
     // Build round1 service as future
-    log::info!("Sending DKG echo broadcast");
+    info!("Sending DKG echo broadcast");
     let echo_broadcast_timeout_service = tower::ServiceBuilder::new()
         .timeout(Duration::from_secs(DKG_ROUND_TIMEOUT))
         .service(echo_broadcast_service);
@@ -107,6 +108,9 @@ pub(crate) async fn run_dkg(
     round_one_rx: &mut mpsc::Receiver<()>,
     round_two_rx: &mut mpsc::Receiver<()>,
 ) -> Result<(), BoxError> {
+    let span = tracing::span!(tracing::Level::TRACE, "run_dkg");
+    let _enter = span.enter();
+
     let protocol_service: Protocol = Protocol::new(node_id.clone(), state.clone(), None);
 
     let round1_future = build_round1_future(
@@ -123,27 +127,26 @@ pub(crate) async fn run_dkg(
 
     // Start round1
     if let Err(e) = round1_future.await {
-        log::error!("Error running round 1: {:?}", e);
+        error!("Error running round 1: {:?}", e);
         return Err("Error running round 1: failed with error".into());
     }
     round_one_rx.recv().await.unwrap();
-    log::info!("Round 1 finished");
+    info!("Round 1 finished");
 
     // start round2
     if let Err(e) = round2_future.await {
-        log::error!("Error running round 2: {:?}", e);
+        error!("Error running round 2: {:?}", e);
         return Err("Error running round 2: failed with error".into());
     }
     round_two_rx.recv().await.unwrap();
-    log::info!("Round 2 finished");
+    info!("Round 2 finished");
 
     // Get packages required to run part3
     match build_key_packages(&state).await {
         Ok((key_package, public_key_package)) => {
-            log::info!(
+            info!(
                 "DKG part3 finished. key_package = {:?}, pubkey_package = {:?}",
-                key_package,
-                public_key_package
+                key_package, public_key_package
             );
             state.dkg_state.set_key_package(key_package).await?;
             state
@@ -153,7 +156,7 @@ pub(crate) async fn run_dkg(
             Ok(())
         }
         Err(e) => {
-            log::error!("Error running DKG part3: {:?}", e);
+            error!("Error running DKG part3: {:?}", e);
             Err(e.into())
         }
     }
@@ -173,7 +176,7 @@ async fn build_key_packages(
     let round1_packages = state.dkg_state.get_received_round1_packages().await?;
     let round2_packages = state.dkg_state.get_received_round2_packages().await?;
 
-    log::debug!(
+    debug!(
         "round1_packages = {:?}, round2_packages = {:?}",
         round1_packages.len(),
         round2_packages.len()
